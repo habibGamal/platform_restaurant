@@ -23,7 +23,7 @@ class BranchFactory extends Factory
     {
         return [
             'organization_id' => function (array $attributes) {
-                if (isset($attributes['restaurant_id'])) {
+                if (isset($attributes['restaurant_id']) && is_scalar($attributes['restaurant_id'])) {
                     $restaurant = Restaurant::find($attributes['restaurant_id']);
                     if ($restaurant instanceof Restaurant) {
                         return $restaurant->organization_id;
