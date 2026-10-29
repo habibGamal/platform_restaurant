@@ -1,10 +1,16 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Models;
 
+use App\Domain\Targets\TargetObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[ObservedBy([TargetObserver::class])]
 class Target extends Model
 {
     protected $table = 'targets';
@@ -29,5 +35,11 @@ class Target extends Model
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    /** @return HasMany<TargetDaily, $this> */
+    public function dailyTargets(): HasMany
+    {
+        return $this->hasMany(TargetDaily::class, 'target_id');
     }
 }
