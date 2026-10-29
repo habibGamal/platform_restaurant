@@ -1,0 +1,39 @@
+<task>
+You are working in the Laravel 11 + FilamentPHP v4 POS app at D:\ai_rewrite_turbo_restaurant\larament (git root is the parent folder; branch feature/platform-connector).
+Implement Task 9 ("Pairing, heartbeat and backfill") of .plan/platform-connector-plan.md — read the whole plan and D:\platform-restaurants\.plans\implementation\contracts.md ("Ingestion HTTP contract": POST /api/v1/pair, /api/v1/pair/rotate, /api/v1/heartbeat — exact request/response shapes) — test-first, with all tests listed in the plan.
+
+Already landed and committed (use; modify only where stated):
+  - PlatformConnection (url, branch_uuid, token, branch_secret (encrypted), timezone, status, paired_at, last_success_at, last_heartbeat_at, last_error; active(); flushCache()), SyncOutbox (incl. doc_key, priority), SyncBatch, Outbox::record(...), DocumentType, SyncOutboxObserver, all builders + BuilderRegistry (incl. InventoryDay/DaySummary with withKey(date) and App\Sync\DateDocument::uuid(DocumentType, string $date)), App\Sync\PlatformClient::sendBatch(...), App\Sync\BatchSender::run(), platform:sync command.
+  - business_date on shifts, wastes, purchase_invoices, return_purchase_invoices, stocktakings; config('app.version').
+  - Landed facts: App\Sync\PlatformClient currently has sendBatch(PlatformConnection $c, array $envelope, string $batchUuid): Response (gzip, Bearer, Idempotency-Key, X-Schema-Version, X-Pos-Version, timeout 30, connectTimeout 10) — add pair/rotate/heartbeat next to it in the same style. BatchSender::run(int $maxSeconds = 50): SyncRunResult. Another agent is finishing day-close documents (app/Sync/Builders/InventoryDayBuilder.php, DaySummaryBuilder.php, app/Sync/DateDocument.php with DateDocument::uuid(DocumentType $type, string $date): string, BuilderRegistry, InventoryDailyAggregationService::closeDay) — do not edit those files, just use DateDocument::uuid.
+  - IMPORTANT: keep tool output small — run only tests/Feature/Sync (not the whole suite), run phpstan only on your own files, never paste whole vendor files.
+
+Build (names exactly as in the plan's Task 9 Interfaces):
+  - Extend App\Sync\PlatformClient with pair(string $url, string $code): Response, rotate(PlatformConnection $c): Response, heartbeat(PlatformConnection $c, array $body): Response (same headers/timeouts conventions as sendBatch; pair has no Authorization header).
+  - App\Sync\PairingService::pair(string $url, string $code): PlatformConnection (replaces any previous connection: mark old ones revoked; trims trailing slash of url; throws App\Sync\Exceptions\PairingFailed with an Arabic message on non-2xx or malformed response), ::unpair(): void.
+  - App\Sync\BackfillService::queueCatalog(): int and ::queueRange(CarbonInterface $from, CarbonInterface $to): int — INSERT…SELECT (or chunked inserts) into sync_outbox with priority 1, skipping documents that already have a pending row (same doc_type+doc_uuid with sent_at null and failed_at null). Range covers: final orders (completed/cancelled) of shifts with business_date in range, order returns of those shifts, shifts, expenses, closed purchase invoices/returns, wastes, stocktakings with business_date in range, plus inventory_day and day_summary for every CLOSED day (inventory_item_movement_daily date with closed_at) in range (doc_key = date, uuid via DateDocument::uuid). Catalog: products, recipes (one per product that has components), categories, suppliers, expense types, users (staff).
+  - pair() calls queueCatalog() and queueRange(today − 90 days, today) after saving.
+  - App\Sync\HeartbeatService::beat(): array — body {pos_version, pending_count, oldest_pending_at, failed_count, last_success_at, server_time, business_date_open (InventoryDailyAggregationService::dayStatus()?->toDateString())}; stores last_heartbeat_at; executes commands: resync {from,to} → queueRange; rotate_token → rotate() and store the new token; unknown commands ignored; 401 → status 'revoked'. Returns the decoded response.
+  - Commands: platform:heartbeat, platform:backfill {--from=} {--to=} {--catalog}, platform:prune (sent outbox rows and batches older than 30 days).
+  - routes/console.php schedule exactly as the plan (sync everyMinute withoutOverlapping(5) runInBackground; heartbeat everyFiveMinutes withoutOverlapping; prune dailyAt 04:00).
+  - Tests: tests/Feature/Sync/PairingTest.php, HeartbeatTest.php, BackfillTest.php, PruneTest.php with Http::fake + Http::preventStrayRequests.
+
+FILE OWNERSHIP: You MAY create/edit ONLY app/Sync/PlatformClient.php, app/Sync/PairingService.php, app/Sync/BackfillService.php, app/Sync/HeartbeatService.php, app/Sync/Exceptions/**, app/Console/Commands/PlatformHeartbeatCommand.php, PlatformBackfillCommand.php, PlatformPruneCommand.php, routes/console.php, and the four test files above. Do not touch anything else (no Filament page — that is the next task).
+</task>
+
+<verification_loop>
+Run commands synchronously and wait for each to finish; never end your reply while a command is still running; your LAST message must be the report.
+  php vendor/bin/pest tests/Feature/Sync
+  php vendor/bin/pint <your files>
+  php vendor/bin/phpstan analyse --memory-limit=1G   (0 errors in your files)
+  php artisan schedule:list   (shows the three platform commands)
+The base commit has ~114 failing legacy tests; don't fix those. Everything under tests/Feature/Sync must pass.
+</verification_loop>
+
+<action_safety>
+Scope strictly to Task 9. No state-changing git commands (no add, commit, stash, checkout, reset, restore, clean, switch). Leave work uncommitted. Never run php artisan serve; never make real network calls.
+</action_safety>
+
+<structured_output_contract>
+End with: 1. What changed and why  2. Files touched  3. Gate outcomes (pest counts, pint, phpstan, schedule:list)  4. Deviations, open questions
+</structured_output_contract>

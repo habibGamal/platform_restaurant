@@ -1,0 +1,42 @@
+<task>
+Repo: D:\platform-restaurants — Laravel 13 + Filament 5.11, MariaDB 10.4 (MySQL-compatible SQL only), PHPUnit tests (NO Pest), Sanctum installed (routes/api.php exists). Multi-restaurant reporting platform; restaurant POS systems push data to it.
+READ FIRST: .plans/implementation/contracts.md (authoritative — "Ingestion HTTP contract" and "POS document payloads"), .plans/00-architecture.md §4 and §5.1–5.2, migration database/migrations/2026_11_02_000001_create_ingest_control_tables.php, app/Domain/Ingestion/Contracts/*, app/Jobs/RecomputeBranchDay.php, app/Models/Branch.php (issueIngestToken, revokeTokens, status), app/Domain/Tenancy/PairingCodeService.php (redeem).
+
+Build the INGESTION HTTP API (task PD):
+1. Routes in routes/api.php under prefix v1 (names api.v1.*):
+   - POST /api/v1/pair (no auth, throttle 10/min per IP): body {code, pos_version}. PairingCodeService::redeem(code) → null ⇒ 422 {message:'رمز الربط غير صالح أو منتهي'}. Else: branch status 'active', pos_version saved, token = $branch->issueIngestToken() → 200 {branch_uuid, token, branch_secret, timezone}.
+   - POST /api/v1/pair/rotate (auth:sanctum + ability ingest): issue a new token (issueIngestToken already deletes old ones) → 200 {token}.
+   - POST /api/v1/ingest/batches (auth:sanctum + ability ingest, throttle 60/min per branch): see 2.
+   - POST /api/v1/heartbeat (auth:sanctum + ability ingest): validate body {pos_version, pending_count, oldest_pending_at, failed_count, last_success_at, server_time, business_date_open} (all optional except pos_version); update branch pos_version, pending_count, failed_count, oldest_pending_at, last_heartbeat_at = now, last_seen_at = now; return 200 {commands: [...undelivered branch_commands as {type, ...payload}], min_supported_schema: 1} and mark them delivered_at = now.
+   Suspended branch (status 'suspended') → 403 on all authenticated endpoints. The authenticated user is the Branch model (Sanctum tokenable). Register Sanctum's ability middleware aliases (`abilities`/`ability` → Laravel\Sanctum\Http\Middleware\CheckAbilities / CheckForAnyAbility) in bootstrap/app.php if needed. Put rate limiters in app/Providers/IngestApiServiceProvider.php (already exists and registered).
+2. Ingest batch controller (App\Http\Controllers\Api\V1\IngestBatchController), must stay fast:
+   - Decode body: if header Content-Encoding is gzip → gzdecode raw content (invalid gzip → 422); then JSON.
+   - Limits: compressed body > 5 MB or > 500 documents → 413.
+   - Envelope validation (422 on failure): schema_version (int, must be 1), batch_uuid (uuid), branch_uuid (must equal the authenticated branch uuid, else 403), pos_version, sent_at, seq_from, seq_to (ints), documents (array).
+   - Idempotency: if ingest_batches has (branch_id, batch_uuid) → 409 with the stored `result` JSON.
+   - Per-document validation with Laravel Validator rules per type: App\Domain\Ingestion\Validation\DocumentRules::for(string $type): array. Common: type in the 16 types, uuid (36-char string), version int ≥ 1, op in upsert|delete, occurred_at date; data required when op=upsert and must contain the keys listed for that type in contracts.md with sensible rules (decimal strings via regex /^-?\d+(\.\d+)?$/, dates Y-m-d, arrays for items/rows/components/payments/refunds). Invalid documents go to `rejected` (with the first validation message as reason) — never reject the whole batch for a bad document.
+   - Store the raw (still compressed if it was) body to Storage::disk('local') at ingest/{organization_id}/{branch_id}/{Y}/{m}/{batch_uuid}.json(.gz).
+   - Create ingest_batches row (status received, counts, result = {accepted:[uuids], rejected:[{uuid,type,reason}]}), ingest_rejections rows for rejected docs, update branch last_seen_at and last_batch_at, dispatch App\Jobs\ProcessIngestBatch (queue 'ingest') with the batch id and the accepted documents' uuids; return 202 {batch_uuid, accepted, rejected}.
+3. App\Jobs\ProcessIngestBatch (ShouldQueue, queue 'ingest'): load the stored body, take accepted documents in envelope order; for each document: DB::transaction(fn () => app(DocumentHandlerRegistry::class)->for($doc['type'])->handle($branch, $doc)); collect dirty dates; if a handler throws → record an ingest_rejections row (reason = exception message), continue with the next document. After the loop: for each unique dirty date dispatch App\Jobs\RecomputeBranchDay($branch->id, $date) with ->delay(now()->addSeconds(30)); update batch status 'processed' (or 'failed' + error if the file is unreadable), processed_at, branch last_seq = max(last_seq, seq_to). Use middleware WithoutOverlapping("branch-{id}") so batches of one branch are processed in order.
+4. Tests (PHPUnit, Tests\TestCase, RefreshDatabase) in tests/Feature/Ingestion/Api/: PairTest (valid code → token works for ingest; expired/used code 422; rotate), IngestBatchTest (gzip + plain bodies; 202 shape; duplicate batch_uuid → 409 same body; wrong branch_uuid 403; bad document rejected but others accepted; 413 limits; 401 without token; 403 suspended; job dispatched — use Queue::fake / Storage::fake), ProcessIngestBatchTest (bind a FAKE DocumentHandlerRegistry in the test container that records calls and returns HandleResult::applied(['2026-10-29']); assert handlers called in order, RecomputeBranchDay dispatched once per unique date with delay, handler exception → rejection row + continues), HeartbeatTest (updates branch fields, returns and marks commands delivered).
+   The real handlers are being written by another agent right now — your tests must NOT depend on them (always bind the fake registry in ProcessIngestBatchTest).
+
+FILE OWNERSHIP — five other agents work in this repo right now. You MAY create/edit ONLY: routes/api.php, bootstrap/app.php (middleware aliases only), app/Http/Controllers/Api/V1/**, app/Http/Requests/Api/V1/** (if used), app/Domain/Ingestion/Validation/**, app/Jobs/ProcessIngestBatch.php, app/Providers/IngestApiServiceProvider.php, tests/Feature/Ingestion/Api/**. Do NOT edit migrations, models, contracts, other providers or anything else; report problems instead.
+</task>
+
+<verification_loop>
+Run commands synchronously and wait for each to finish; never end your reply while a command is still running. Your test database is platform_test_3 — ALWAYS set it (bash: DB_DATABASE=platform_test_3 php artisan test …; PowerShell: $env:DB_DATABASE='platform_test_3'; …).
+  DB_DATABASE=platform_test_3 php artisan test tests/Feature/Ingestion/Api
+  DB_DATABASE=platform_test_3 php artisan test
+  php vendor/bin/pint <your files>
+  php vendor/bin/phpstan analyse --memory-limit=1G
+Fix failures caused by your files; list failures that are only in other agents' new files.
+</verification_loop>
+
+<action_safety>
+No state-changing git commands (no add, commit, stash, checkout, reset, restore, clean). Leave work uncommitted. Never run php artisan serve. Never run migrate:fresh or tests against the platform_restaurants database.
+</action_safety>
+
+<structured_output_contract>
+End with: 1. What changed and why  2. Files touched  3. Gate outcomes (test counts, pint, phpstan)  4. Decisions, contract ambiguities you resolved, open questions
+</structured_output_contract>

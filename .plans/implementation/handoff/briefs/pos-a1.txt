@@ -1,0 +1,36 @@
+<task>
+You are working in the Laravel 11 + FilamentPHP v4 POS app at D:\ai_rewrite_turbo_restaurant\larament (git root is the parent folder; branch feature/platform-connector).
+Implement Tasks 1, 2 and 3 of the implementation plan .plan/platform-connector-plan.md (read the whole plan first, then implement exactly those three tasks, test-first, as written there):
+  - Task 1: stable `uuid` column + `App\Models\Concerns\HasSyncUuid` trait on the 14 listed models (+ backfill migration, uuid unique index, integer `id` stays the primary key).
+  - Task 2: `business_date` columns on shifts, wastes, purchase_invoices, return_purchase_invoices, stocktakings, set from `InventoryDailyAggregationService::currentBusinessDate()` in ShiftService::startShift, WasteService::closeWaste, PurchaseService::closePurchaseInvoice / closeReturnPurchaseInvoice, StocktakingService::closeStocktaking (+ backfill + `date` casts).
+  - Task 3: `App\Enums\ExpenseCategory` + `expence_types.category` (default 'other') + Filament select/column in app/Filament/Resources/ExpenseTypes/ExpenseTypeResource.php + Arabic labels in lang/ar.json.
+Migration file names: database/migrations/2026_11_01_000001_add_uuid_to_synced_tables.php, 2026_11_01_000002_add_business_date_columns.php, 2026_11_01_000003_add_category_to_expence_types.php.
+Note: OrderReturn has no factory; create records directly in tests. Existing tests use SQLite in-memory (phpunit.xml) — migrations must work on SQLite AND MySQL/MariaDB.
+
+FILE OWNERSHIP — other agents are editing this same working tree at the same time:
+  You MAY edit: the models listed in Task 1 and Task 2/3 casts, the 3 migrations above, app/Models/Concerns/HasSyncUuid.php, app/Enums/ExpenseCategory.php, the four services named in Task 2, ExpenseTypeResource (and its form/table schema classes if split), lang/ar.json, database/factories only if a factory must set new columns, and new tests under tests/Feature/Sync/ (SyncUuidTest.php, BusinessDateTest.php, ExpenseCategoryTest.php).
+  Do NOT edit: tests/Pest.php, routes/*, config/*, app/Sync/*, app/Http/*, app/Providers/*, app/Services/BranchService.php, deploy.sh, any other file. Other agents own those.
+</task>
+
+<verification_loop>
+Run commands synchronously and wait for each to finish; never end your reply while a command is still running.
+  php vendor/bin/pest tests/Feature/Sync/SyncUuidTest.php tests/Feature/Sync/BusinessDateTest.php tests/Feature/Sync/ExpenseCategoryTest.php
+  php vendor/bin/pest --parallel
+  php vendor/bin/pint <each file you created or edited>
+  php vendor/bin/phpstan analyse --memory-limit=1G
+If the full suite or phpstan shows failures ONLY in files you did not touch (another agent's in-progress work), do not fix them — list them in your report. Fix every failure caused by your files.
+</verification_loop>
+
+<action_safety>
+Keep changes scoped to these three tasks. No unrelated refactors.
+Do NOT run any git command that changes state (no add, commit, stash, checkout, reset, restore, clean, switch). `git status` / `git diff` are fine. Leave all work uncommitted.
+Never run `php artisan serve`, never run migrate:fresh against the real .env database.
+</action_safety>
+
+<structured_output_contract>
+End with a report in this exact shape:
+  1. What changed and why (per task)
+  2. Files touched
+  3. Gate outcomes (pest counts for your files and the full suite, pint, phpstan)
+  4. Deviations from the plan, open questions, failures seen in files you don't own
+</structured_output_contract>

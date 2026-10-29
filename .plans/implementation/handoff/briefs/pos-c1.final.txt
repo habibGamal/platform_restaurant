@@ -1,0 +1,41 @@
+<task>
+You are working in the Laravel 11 + FilamentPHP v4 POS app at D:\ai_rewrite_turbo_restaurant\larament (git root is the parent folder; branch feature/platform-connector).
+Implement Task 7 ("Day close documents") of .plan/platform-connector-plan.md — read the whole plan and D:\platform-restaurants\.plans\implementation\contracts.md ("POS document payloads": inventory_day and day_summary rows are the exact keys the platform validates) — test-first.
+
+Already landed and committed (use, do not modify unless stated):
+  - Outbox::record(DocumentType $type, string $uuid, string $op = 'upsert', int $priority = 5, ?string $key = null); SyncOutbox has doc_key; DocumentType::InventoryDay ('inventory_day') and DocumentType::DaySummary ('day_summary').
+  - App\Sync\Builders\DocumentBuilder interface with type(), build(string $uuid): ?array, withKey(?string $key): static; trait App\Sync\Builders\Concerns\IgnoresKey; App\Sync\Payload (money/qty/ts/customerHash); App\Sync\BuilderRegistry (for(DocumentType)).
+  - Shift has business_date; Waste has business_date; PlatformConnection::active() has branch_uuid; pairPlatform() test helper.
+  - Landed facts: App\Sync\Payload has money(), qty(), ts(), date(), customerHash(); builders live in app/Sync/Builders/ (OrderBuilder, OrderReturnBuilder, ShiftBuilder, ExpenseBuilder, PurchaseBuilder, WasteBuilder, StocktakingBuilder, ProductBuilder, RecipeBuilder, CategoryBuilder, SupplierBuilder, ExpenseTypeBuilder, StaffBuilder); SyncOutboxObserver (app/Sync) records documents on model events; the full tests/Feature/Sync suite currently passes (102 tests).
+  - IMPORTANT: run long commands (phpstan, full test suite) synchronously and wait for the result BEFORE writing anything else; your final message must be the report — never end while a command is still running.
+
+Build:
+  - App\Sync\Builders\InventoryDayBuilder and DaySummaryBuilder implementing DocumentBuilder WITH a real withKey($date) that stores the date; build($uuid) uses that date (return null if no key or no data for that date). Payload data:
+      inventory_day: {date, rows: [{product_uuid, start_qty, incoming_qty, sales_qty, return_sales_qty, waste_qty (= return_waste_quantity column), end_qty}]} from inventory_item_movement_daily for that date (quantities via Payload::qty).
+      day_summary for business_date = date: orders_count (non-deleted orders of shifts with that business_date), completed_count, net_total = Σ(total − tax) of completed, discount_total = Σ discount of completed, cogs_total = Σ order_items quantity × cost of completed orders, expenses_total = Σ expenses of shifts with that business_date, waste_total = Σ total of closed wastes with that business_date (money via Payload::money). Include the key `date` in both.
+  - Register both in App\Sync\BuilderRegistry.
+  - Doc uuid: Ramsey\Uuid\Uuid::uuid5(PlatformConnection::active()->branch_uuid, "{$type}:{$date}")->toString() — put it in a small static helper App\Sync\DateDocument::uuid(DocumentType $type, string $date): string.
+  - App\Services\InventoryDailyAggregationService::closeDay(): inside its existing transaction, after closing, record both documents for the closed date with key = date (only when paired; Outbox already no-ops otherwise).
+  - DO NOT use DailySnapshot (never written in this codebase).
+  - Tests in tests/Feature/Sync/DayCloseDocumentsTest.php (the three tests in the plan + exact payload strings for a fixture with 3 completed orders and 1 cancelled order across midnight in the same business day, expenses and a closed waste) and builder tests in tests/Feature/Sync/Builders/InventoryDayBuilderTest.php, DaySummaryBuilderTest.php.
+
+FILE OWNERSHIP — another agent is writing app/Sync/PlatformClient.php, app/Sync/BatchSender.php, app/Sync/SyncRunResult.php, app/Console/Commands/PlatformSyncCommand.php and tests/Feature/Sync/BatchSenderTest.php at the same time. Do NOT touch those.
+  You MAY edit/create ONLY: app/Sync/Builders/InventoryDayBuilder.php, app/Sync/Builders/DaySummaryBuilder.php, app/Sync/DateDocument.php, app/Sync/BuilderRegistry.php, app/Services/InventoryDailyAggregationService.php, tests/Feature/Sync/DayCloseDocumentsTest.php, tests/Feature/Sync/Builders/InventoryDayBuilderTest.php, tests/Feature/Sync/Builders/DaySummaryBuilderTest.php.
+</task>
+
+<verification_loop>
+Run commands synchronously and wait for each to finish; never end your reply while a command is still running.
+  php vendor/bin/pest tests/Feature/Sync
+  php vendor/bin/pest --parallel
+  php vendor/bin/pint <your files>
+  php vendor/bin/phpstan analyse --memory-limit=1G
+The base commit already has ~114 failing legacy tests (e.g. ExpensesReportTest, PrintJobsTest, OrderStockConversionServiceTest, Auth tests). Do not fix those; make sure everything under tests/Feature/Sync passes and that you add no NEW failures (e.g. in tests that exercise closeDay — check tests/Feature/Orders/ClosedDayOrderCancellationAndReturnTest.php and any InventoryDailyAggregation tests).
+</verification_loop>
+
+<action_safety>
+Scope strictly to Task 7. Do NOT run state-changing git commands (no add, commit, stash, checkout, reset, restore, clean, switch). Leave work uncommitted. Never run php artisan serve or migrate against the real .env database.
+</action_safety>
+
+<structured_output_contract>
+End with: 1. What changed and why  2. Files touched  3. Gate outcomes (pest counts for tests/Feature/Sync and any closeDay tests, pint, phpstan)  4. Deviations, open questions
+</structured_output_contract>

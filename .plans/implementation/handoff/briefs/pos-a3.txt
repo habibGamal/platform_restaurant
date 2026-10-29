@@ -1,0 +1,33 @@
+<task>
+You are working in the Laravel 11 + FilamentPHP v4 POS app at D:\ai_rewrite_turbo_restaurant\larament (git root is the parent folder; branch feature/platform-connector).
+Implement Task 11 of the implementation plan .plan/platform-connector-plan.md (read the whole plan first), test-first, as written, PLUS the app version config:
+  1. App\Http\Middleware\VerifyApiKey: compares header X-Api-Key with config('app.web_api_key') using hash_equals; returns 401 JSON {"message": "Unauthorized"} otherwise; if the config value is empty, ALL protected requests are rejected (fail closed).
+  2. Apply it in routes/api.php to every route EXCEPT GET/POST /check and the /management/* group: /products/product_search, /validate_products, /all-products, /all-products-refs-master, /all-products-prices-master, /all-products-recipes-master, /get-products-master, /get-products-master-by-refs, /get-products-prices-master, /web-orders/place-order, /can-accept-order, /get-shift-id, /save-order/{order}.
+  3. app/Http/Controllers/Api/ManagementController.php: accept the secret ONLY from the X-Management-Key header (remove the ?key= query fallback); use hash_equals.
+  4. app/Services/BranchService.php: every outgoing Http call to the master node sends header X-Api-Key = config('app.web_api_key').
+  5. config/app.php: add 'web_api_key' => env('WEB_API_KEY') and 'version' => env('APP_VERSION', '1.0.0'). Add WEB_API_KEY= and APP_VERSION=1.0.0 to .env.example.
+  6. deploy.sh: idempotently ensure the crontab line `* * * * * cd /var/www/turbo_restaurant/larament && php artisan schedule:run >> /dev/null 2>&1` exists (crontab -l | grep -qF ... || append), and export APP_VERSION from `git describe --tags --always` into .env (replace existing APP_VERSION line or append). Keep the rest of deploy.sh unchanged. Mention the crontab in refresh.sh only as a comment if useful.
+  7. Tests: tests/Feature/Api/ApiKeyTest.php covering: protected route without key → 401; wrong key → 401; correct key → not 401; /api/check without key → 200; management endpoint with ?key= only → 401, with header → authorized; BranchService requests include X-Api-Key (Http::fake + Http::assertSent); empty config key → 401 even when header empty.
+Note: the POS's own UI uses web routes (/orders/save-order/...), not these /api routes, so the cashier screens are unaffected.
+
+FILE OWNERSHIP — other agents edit this same working tree concurrently:
+  You MAY edit only: app/Http/Middleware/VerifyApiKey.php (new), routes/api.php, app/Http/Controllers/Api/ManagementController.php, app/Services/BranchService.php, config/app.php, .env.example, deploy.sh, refresh.sh, bootstrap/app.php only if middleware alias registration is needed, tests/Feature/Api/ApiKeyTest.php (new).
+  Do NOT edit any other file (models, other services, tests/Pest.php, lang, app/Sync are owned by other agents). Do not edit .env.
+</task>
+
+<verification_loop>
+Run commands synchronously and wait for each to finish; never end your reply while a command is still running.
+  php vendor/bin/pest tests/Feature/Api/ApiKeyTest.php
+  php vendor/bin/pest --parallel
+  php vendor/bin/pint <each file you created or edited>
+  php vendor/bin/phpstan analyse --memory-limit=1G
+If failures appear ONLY in files you did not touch, do not fix them — list them. Existing tests that call the protected API routes must be updated to send the key only if they are API tests about these routes (tell me which).
+</verification_loop>
+
+<action_safety>
+Scope strictly to this task. Do NOT run any state-changing git command (no add, commit, stash, checkout, reset, restore, clean, switch); git status/diff are fine. Leave work uncommitted. Never run `php artisan serve`. Do not execute deploy.sh.
+</action_safety>
+
+<structured_output_contract>
+End with: 1. What changed and why  2. Files touched  3. Gate outcomes (pest counts, pint, phpstan)  4. Deviations, open questions, failures seen in files you don't own, and any external system (website, slave nodes) that must start sending X-Api-Key
+</structured_output_contract>

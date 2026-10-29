@@ -1,0 +1,11 @@
+Follow-up from the orchestrator. Two changes to your task PF1:
+1. The orchestrator removed your AggregationTestCase and tests/Fixtures/bootstrap/** workaround (a custom provider list + cached manifest is not acceptable — tests must boot the real application). While doing so the orchestrator accidentally EMPTIED these four files (they are now 0 bytes):
+   tests/Feature/Aggregation/BranchDayRebuilderTest.php
+   tests/Feature/Aggregation/RebuildCommandTest.php
+   tests/Feature/Aggregation/ReconcilerTest.php
+   tests/Feature/Aggregation/TwoBranchesTwoWeeksFixtureTest.php
+   Recreate all four with the same tests you had (same coverage, same assertions), each extending Tests\TestCase directly (use Illuminate\Foundation\Testing\RefreshDatabase). Do NOT recreate AggregationTestCase or tests/Fixtures/bootstrap.
+2. If the tests fail to boot because of another agent's unfinished app/Filament/App/** class, report the exact error instead of working around it.
+Do not change tests/Fixtures/TwoBranchesTwoWeeks.php or the aggregation code unless a test reveals a real bug (report it if so).
+Gates: DB_DATABASE=platform_test_5 php artisan test tests/Feature/Aggregation; php vendor/bin/pint tests/Feature/Aggregation; php vendor/bin/phpstan analyse tests/Feature/Aggregation --memory-limit=1G.
+Run commands synchronously; your LAST message must be a short report: files recreated, test counts, anything that failed to boot.

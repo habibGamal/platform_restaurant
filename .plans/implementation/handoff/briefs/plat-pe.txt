@@ -1,0 +1,34 @@
+<task>
+Repo: D:\platform-restaurants — Laravel 13 + Filament 5.11, MariaDB 10.4, PHPUnit tests (NO Pest). ALL UI is Filament; Arabic labels (RTL).
+READ FIRST: .plans/implementation/contracts.md, .plans/features/access-control.md, .plans/features/targets-management.md, .plans/00-architecture.md §4.5 (pairing) and §6.1, app/Providers/Filament/AppPanelProvider.php (panel 'app' at /app, resources auto-discovered from app/Filament/App/Resources, nav group 'الإدارة'), app/Models/{User,Organization,Restaurant,Branch,BranchSet,Target,CalendarEvent}.php, app/Models/Warehouse/DimExpenseType.php, app/Domain/Tenancy/{AccessibleBranches,PairingCodeService}.php, database/seeders/RolesAndPermissionsSeeder.php, and the existing admin-panel resources in app/Filament/Admin/Resources/* (same Filament 5 style to follow).
+
+Build the MANAGEMENT section of the `app` panel (task PE), navigation group 'الإدارة', everything scoped to the signed-in user's organization (models using BelongsToOrganization are scoped automatically; scope others explicitly by organization_id):
+1. RestaurantResource (org_owner only via permission branches.manage): list/create/edit name.
+2. BranchResource (view: users with analytics.view see their accessible branches; create/edit requires branches.manage): name, restaurant (org's), timezone (default Africa/Cairo), opened_on; table shows status badge (Arabic BranchStatus labels), last_seen_at (relative), pos_version. Row actions (branches.manage): "إنشاء رمز ربط" → PairingCodeService::generate($branch, auth()->user()) and show the code in a persistent notification with instructions; "إلغاء الربط" → revokeTokens() + status pending (confirm).
+3. UserResource (users.manage): org users only; create/edit name, email, password (required on create), role select (org_owner, org_analyst, branch_manager — Arabic labels مالك / محلل / مدير فرع), branches multi-select (only for branch_manager; options = org branches) stored in user_branch_access; cannot edit or delete yourself into losing owner role if you are the last org_owner (validation error). New users get organization_id = current user's org.
+4. BranchSetResource (any user with analytics.view): name, branches (accessible to the user), "org-wide" toggle only for users with users.manage (user_id null) else user_id = current user; list shows org-wide + own sets; users can edit/delete only their own sets (owners can manage org-wide ones).
+5. TargetResource (targets.manage to create/edit; analytics.view to list): fields branch (org's), metric select (net_sales 'المبيعات', net_profit 'صافي الربح', orders 'عدد الطلبات', food_cost_pct 'نسبة تكلفة الخامات' — entered as a percent 0–100 and stored as ratio 0–1), period_month (month picker → store first day of month), value, distribution (weekday_weights 'حسب أيام الأسبوع' / flat 'بالتساوي'), notes; created_by/updated_by set automatically. Table filters: branch, metric, month. Unique (branch, metric, month) validation with an Arabic message. Header actions: "نسخ الشهر السابق" (copy all targets of the previous month into the chosen month, skipping existing) and "الشهر المماثل من العام الماضي + نسبة" (for each branch: last year's same-month actual from agg_branch_daily (net_sales → SUM(net_sales_after_returns), net_profit → SUM(net_profit), orders → SUM(orders_count)) × (1 + percent/100), skipping branches with no history). Past months are read-only (edit/delete disabled) unless the user is org_owner. Do NOT implement the daily distribution — another agent is building TargetDistributor and hooks it via a Target observer; just save Target models normally.
+6. CalendarEventResource (analytics.view list; users.manage edit): name, kind (ramadan رمضان / eid عيد / holiday إجازة / promo عرض), date_from, date_to (≥ from); organization_id = user's org; global events (organization_id null) visible read-only.
+7. ExpenseCategoryMapping page or resource over dim_expense_types of the org (users.manage): table name, branch name, POS category, effective category; inline Select to set category_override (labor عمالة ورواتب, rent إيجار, utilities مرافق, marketing تسويق, maintenance صيانة, raw_materials خامات, other أخرى; empty = use POS value). After changing an override dispatch App\Jobs\RecomputeBranchDay for that branch for every date from the 1st of the previous month to today (Africa/Cairo).
+8. Policies (app/Policies/*) backed by the spatie permissions listed above, registered via Laravel auto-discovery or Gate::policy in app/Providers/AppServiceProvider.php ONLY if auto-discovery doesn't work for these models (prefer auto-discovery; do not edit AppServiceProvider otherwise).
+9. Tests (PHPUnit, RefreshDatabase; seed RolesAndPermissionsSeeder) in tests/Feature/App/Management/: per resource — list scoped to own organization (other org's records never visible), permission checks (analyst/manager cannot create targets/users; manager sees only accessible branches), user creation with manager branch access, last-owner protection, target uniqueness + percent→ratio conversion + copy-previous-month + last-year+% actions, branch pairing-code action, branch set org-wide vs personal visibility, expense category override dispatches recompute jobs (Queue::fake).
+
+FILE OWNERSHIP — five other agents work in this repo right now (one builds report PAGES/WIDGETS in app/Filament/App/Pages/Reports/** and app/Filament/App/Widgets/**). You MAY create/edit ONLY: app/Filament/App/Resources/**, app/Filament/App/Pages/Management/** (if you build a custom page), app/Policies/**, tests/Feature/App/Management/**. Do NOT edit models, migrations, AppPanelProvider, domain code or other providers; report problems instead.
+</task>
+
+<verification_loop>
+Run commands synchronously and wait for each to finish; never end your reply while a command is still running. Your test database is platform_test_7 — ALWAYS set it (bash: DB_DATABASE=platform_test_7 php artisan test …; PowerShell: $env:DB_DATABASE='platform_test_7'; …).
+  DB_DATABASE=platform_test_7 php artisan test tests/Feature/App/Management
+  DB_DATABASE=platform_test_7 php artisan test
+  php vendor/bin/pint <your files>
+  php vendor/bin/phpstan analyse --memory-limit=1G
+Fix failures caused by your files; list failures only in other agents' new files.
+</verification_loop>
+
+<action_safety>
+No state-changing git commands (no add, commit, stash, checkout, reset, restore, clean). Leave work uncommitted. Never run php artisan serve. Never run migrate:fresh or tests against the platform_restaurants database.
+</action_safety>
+
+<structured_output_contract>
+End with: 1. What changed and why  2. Files touched  3. Gate outcomes (test counts, pint, phpstan)  4. Decisions, problems with shared models/permissions, open questions
+</structured_output_contract>
