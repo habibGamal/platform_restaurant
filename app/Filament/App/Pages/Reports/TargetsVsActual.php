@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Filament\App\Pages\Reports;
 
-use App\Filament\App\Widgets\Reports\ComingSoonWidget;
+use App\Filament\App\Widgets\Reports\TargetsVsActual\TargetsBranchTableWidget;
+use App\Filament\App\Widgets\Reports\TargetsVsActual\TargetsBurnUpChartWidget;
+use App\Filament\App\Widgets\Reports\TargetsVsActual\TargetsGaugeOverviewWidget;
+use App\Filament\App\Widgets\Reports\TargetsVsActual\TargetsHistoryWidget;
 use BackedEnum;
 use Filament\Support\Icons\Heroicon;
 
@@ -23,7 +26,10 @@ class TargetsVsActual extends ReportPage
     public function getWidgets(): array
     {
         return [
-            ComingSoonWidget::class,
+            TargetsGaugeOverviewWidget::class,
+            TargetsBranchTableWidget::class,
+            TargetsBurnUpChartWidget::class,
+            TargetsHistoryWidget::class,
         ];
     }
 }
