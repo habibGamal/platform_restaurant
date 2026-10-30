@@ -4,8 +4,19 @@ declare(strict_types=1);
 
 namespace App\Filament\App\Pages\Reports;
 
-use App\Filament\App\Widgets\Reports\ComingSoonWidget;
+use App\Domain\Metrics\Period\PeriodPreset;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\BudgetVsActualWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\CategoryBranchMatrixWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\ExpenseListTableWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\ExpensesPurchasesKpiStatsWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\ExpensesPurchasesNoticeWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\ExpensesVsSalesGrowthWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\PurchasesPerBranchWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\PurchasesVsCogsWidget;
+use App\Filament\App\Widgets\Reports\ExpensesPurchases\SupplierSummaryTableWidget;
 use BackedEnum;
+use Filament\Forms\Components\Select;
+use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 
 class ExpensesPurchases extends ReportPage
@@ -20,10 +31,41 @@ class ExpensesPurchases extends ReportPage
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptRefund;
 
+    public function mount(): void
+    {
+        parent::mount();
+
+        if (! isset($this->filters['preset'])) {
+            $this->filters['preset'] = PeriodPreset::this_month->value;
+        }
+    }
+
+    public function filtersForm(Schema $schema): Schema
+    {
+        $schema = parent::filtersForm($schema);
+        $components = $schema->getComponents();
+
+        foreach ($components as $component) {
+            if ($component instanceof Select && $component->getName() === 'preset') {
+                $component->default(PeriodPreset::this_month->value);
+            }
+        }
+
+        return $schema;
+    }
+
     public function getWidgets(): array
     {
         return [
-            ComingSoonWidget::class,
+            ExpensesPurchasesNoticeWidget::class,
+            ExpensesPurchasesKpiStatsWidget::class,
+            CategoryBranchMatrixWidget::class,
+            BudgetVsActualWidget::class,
+            ExpensesVsSalesGrowthWidget::class,
+            PurchasesPerBranchWidget::class,
+            SupplierSummaryTableWidget::class,
+            PurchasesVsCogsWidget::class,
+            ExpenseListTableWidget::class,
         ];
     }
 }
