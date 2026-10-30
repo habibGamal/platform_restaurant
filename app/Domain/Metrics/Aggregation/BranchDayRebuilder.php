@@ -9,6 +9,7 @@ use App\Events\BranchDayUpdated;
 use App\Support\Weekday;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class BranchDayRebuilder implements BranchDayAggregator
 {
@@ -462,10 +463,21 @@ class BranchDayRebuilder implements BranchDayAggregator
                 if ($shift->start_at && $shift->end_at) {
                     $start = Carbon::parse($shift->start_at);
                     $end = Carbon::parse($shift->end_at);
-                    if ($end->lessThan($start)) {
+                    // Legacy same-day clock values may represent an overnight shift.
+                    if ($end->lessThan($start) && $end->isSameDay($start)) {
                         $end = $end->addDay();
                     }
-                    $durationMinutes = (int) $start->diffInMinutes($end);
+
+                    if ($end->lessThan($start)) {
+                        Log::warning('Shift end precedes start; duration is unavailable.', [
+                            'branch_id' => $branchId,
+                            'shift_uuid' => $shift->uuid,
+                            'start_at' => $shift->start_at,
+                            'end_at' => $shift->end_at,
+                        ]);
+                    } else {
+                        $durationMinutes = (int) $start->diffInMinutes($end);
+                    }
                 }
 
                 $sCashDeficit = 0.0;

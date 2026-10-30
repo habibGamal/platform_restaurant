@@ -19,6 +19,7 @@ use App\Models\Warehouse\WhWaste;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class BranchDayRebuilderTest extends TestCase
@@ -32,6 +33,68 @@ class BranchDayRebuilderTest extends TestCase
     protected Branch $branch;
 
     protected BranchDayAggregator $rebuilder;
+
+    /** @return array<string, array{?string, ?string, ?int}> */
+    public static function shiftDurations(): array
+    {
+        return [
+            'normal shift' => ['2026-10-05 09:00:00', '2026-10-05 17:00:00', 480],
+            'crosses midnight' => ['2026-10-05 22:00:00', '2026-10-06 06:00:00', 480],
+            'legacy same-day overnight' => ['2026-10-05 22:00:00', '2026-10-05 06:00:00', 480],
+            'multiple days' => ['2026-10-05 09:00:00', '2026-10-07 10:00:00', 2940],
+            'same instant' => ['2026-10-05 09:00:00', '2026-10-05 09:00:00', 0],
+            'open shift' => ['2026-10-05 09:00:00', null, null],
+            'missing start' => [null, '2026-10-05 17:00:00', null],
+            'previous-day end' => ['2026-10-05 09:00:00', '2026-10-04 17:00:00', null],
+            'imported start months after end' => ['2026-10-30 13:42:10', '2026-08-02 05:34:37', null],
+        ];
+    }
+
+    #[DataProvider('shiftDurations')]
+    public function test_shift_duration_does_not_prevent_rebuilding_sales(?string $start, ?string $end, ?int $expectedMinutes): void
+    {
+        $date = '2026-10-05';
+        WhShift::create([
+            'organization_id' => $this->organization->id,
+            'branch_id' => $this->branch->id,
+            'uuid' => 'duration-shift',
+            'source_version' => 1,
+            'business_date' => $date,
+            'start_at' => $start,
+            'end_at' => $end,
+            'closed' => $end !== null,
+        ]);
+        WhOrder::create([
+            'organization_id' => $this->organization->id,
+            'branch_id' => $this->branch->id,
+            'uuid' => 'duration-order',
+            'source_version' => 1,
+            'business_date' => $date,
+            'shift_uuid' => 'duration-shift',
+            'type' => 'dine_in',
+            'status' => 'completed',
+            'sub_total' => '100.00',
+            'total' => '100.00',
+        ]);
+
+        $this->rebuilder->recompute($this->branch->id, $date);
+        $this->rebuilder->recompute($this->branch->id, $date);
+
+        $this->assertDatabaseHas('agg_shift', [
+            'branch_id' => $this->branch->id,
+            'shift_uuid' => 'duration-shift',
+            'duration_minutes' => $expectedMinutes,
+            'start_at' => $start,
+            'end_at' => $end,
+            'orders_count' => 1,
+            'net_sales' => '100.00',
+        ]);
+        $this->assertDatabaseHas('agg_branch_daily', [
+            'branch_id' => $this->branch->id,
+            'business_date' => $date,
+            'net_sales' => '100.00',
+        ]);
+    }
 
     protected function setUp(): void
     {

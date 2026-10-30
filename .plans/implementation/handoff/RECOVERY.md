@@ -60,6 +60,30 @@ Then run `php artisan platform:sync` on the POS. Do not delete ingestion history
 old batch UUIDs retain their original responses, and old ingest_rejections remain
 historical records even after a successful resend.
 
+## Aggregate failure: duration_minutes out of range
+
+Some imported shifts have end_at earlier than start_at by multiple days or months.
+Carbon produces a negative duration, which cannot fit agg_shift.duration_minutes
+(unsigned integer). A same-day reversed clock is still handled as a legacy
+overnight shift; a reversed calendar date now leaves duration null and logs the
+branch/shift/timestamps. Source timestamps and sales are preserved. No migration
+or POS resend is required to restore aggregation. Correct source POS timestamps
+separately before expecting accurate historical shift durations.
+
+After deploying the fix, restart the existing aggregate workers to load the new
+code. With an unmanaged terminal worker, stop and restart its queue:work command;
+queue:restart alone does not launch a replacement process. Then run on the platform:
+
+```bash
+php artisan queue:retry --queue=aggregate
+php artisan ingest:recover
+```
+
+Validation: 48 aggregation, ShiftsWeekdays report and ingestion recovery tests pass
+on platform_test_12, including long reversed timestamps, previous-day invalid ends,
+normal and legacy overnight shifts, zero duration, multiple days and missing dates.
+Targeted Pint and PHPStan pass.
+
 ## Validation boundaries
 
 Cross-app verification uses a transient CLI HTTP-kernel bridge, real POS builders,
