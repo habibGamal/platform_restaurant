@@ -8,6 +8,7 @@ use App\Models\Organization;
 use App\Models\Restaurant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class PairingCodeServiceTest extends TestCase
@@ -97,5 +98,25 @@ class PairingCodeServiceTest extends TestCase
         $redeemed = PairingCodeService::redeem($code2);
         $this->assertNotNull($redeemed);
         $this->assertSame($this->branch->id, $redeemed->id);
+    }
+
+    public function test_redeem_uses_transactional_row_lock(): void
+    {
+        $code = PairingCodeService::generate($this->branch, $this->user);
+
+        $queries = [];
+        DB::listen(function ($query) use (&$queries) {
+            $queries[] = $query->sql;
+        });
+
+        $redeemed = PairingCodeService::redeem($code);
+        $this->assertNotNull($redeemed);
+        $this->assertSame($this->branch->id, $redeemed->id);
+
+        $hasLockForUpdate = collect($queries)->contains(function (string $sql): bool {
+            return str_contains(strtolower($sql), 'for update');
+        });
+
+        $this->assertTrue($hasLockForUpdate, 'PairingCodeService::redeem must execute a transactional row lock (FOR UPDATE).');
     }
 }

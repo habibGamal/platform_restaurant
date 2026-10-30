@@ -2,6 +2,8 @@
 
 namespace App\Domain\Metrics\Aggregation;
 
+use App\Domain\Ingestion\Exceptions\FencedWorkerException;
+use App\Domain\Ingestion\Support\DirtyDateOutbox;
 use App\Domain\Metrics\Contracts\BranchDayAggregator;
 use App\Events\BranchDayUpdated;
 use App\Support\Weekday;
@@ -14,9 +16,24 @@ class BranchDayRebuilder implements BranchDayAggregator
         protected Reconciler $reconciler
     ) {}
 
-    public function recompute(int $branchId, string $businessDate): void
+    public function recompute(int $branchId, string $businessDate, ?int $fenceToken = null): void
     {
-        DB::transaction(function () use ($branchId, $businessDate) {
+        $fenceToken ??= DirtyDateOutbox::claimRecomputeFence($branchId, $businessDate);
+
+        DB::transaction(function () use ($branchId, $businessDate, $fenceToken) {
+
+            // Keep competing recomputations serialized for the entire rebuild,
+            // including workers whose cache lease expired during a long query.
+            $fence = DB::table('ingest_recompute_fences')
+                ->where('branch_id', $branchId)
+                ->where('business_date', $businessDate)
+                ->lockForUpdate()
+                ->first();
+
+            if ($fence !== null && $fenceToken < (int) $fence->committed_token) {
+                throw new FencedWorkerException('Recompute worker has been superseded.');
+            }
+
             // 1. Delete all agg_* rows for this (branch, date)
             DB::table('agg_branch_daily')
                 ->where('branch_id', $branchId)
@@ -61,6 +78,12 @@ class BranchDayRebuilder implements BranchDayAggregator
 
             // If the branch has no warehouse data at all for that date, leave no agg rows (still fire the event)
             if (! $this->hasWarehouseData($branchId, $businessDate)) {
+
+                if (! DirtyDateOutbox::isFenceCurrent($branchId, $businessDate, $fenceToken)) {
+                    throw new FencedWorkerException("Recompute worker fenced: fence token {$fenceToken} superseded.");
+                }
+                DirtyDateOutbox::commitRecomputeFence($branchId, $businessDate, $fenceToken);
+
                 BranchDayUpdated::dispatch($organizationId, $branchId, $businessDate);
 
                 return;
@@ -526,6 +549,11 @@ class BranchDayRebuilder implements BranchDayAggregator
             if (! empty($purchaseDailyRows)) {
                 DB::table('agg_purchase_daily')->insert($purchaseDailyRows);
             }
+
+            if (! DirtyDateOutbox::isFenceCurrent($branchId, $businessDate, $fenceToken)) {
+                throw new FencedWorkerException("Recompute worker fenced: fence token {$fenceToken} superseded.");
+            }
+            DirtyDateOutbox::commitRecomputeFence($branchId, $businessDate, $fenceToken);
 
             // 17. Dispatch BranchDayUpdated
             BranchDayUpdated::dispatch($organizationId, $branchId, $businessDate);

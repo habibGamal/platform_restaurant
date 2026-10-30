@@ -5,6 +5,7 @@ namespace App\Domain\Tenancy;
 use App\Models\Branch;
 use App\Models\BranchPairingCode;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class PairingCodeService
 {
@@ -41,17 +42,20 @@ class PairingCodeService
         $cleanCode = strtoupper(trim($code));
         $codeHash = hash('sha256', $cleanCode);
 
-        $pairingCode = BranchPairingCode::where('code_hash', $codeHash)
-            ->whereNull('used_at')
-            ->where('expires_at', '>', now())
-            ->first();
+        return DB::transaction(function () use ($codeHash): ?Branch {
+            $pairingCode = BranchPairingCode::where('code_hash', $codeHash)
+                ->whereNull('used_at')
+                ->where('expires_at', '>', now())
+                ->lockForUpdate()
+                ->first();
 
-        if (! $pairingCode) {
-            return null;
-        }
+            if (! $pairingCode) {
+                return null;
+            }
 
-        $pairingCode->update(['used_at' => now()]);
+            $pairingCode->update(['used_at' => now()]);
 
-        return $pairingCode->branch;
+            return $pairingCode->branch;
+        });
     }
 }
