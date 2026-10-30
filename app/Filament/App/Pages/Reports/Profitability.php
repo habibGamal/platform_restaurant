@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace App\Filament\App\Pages\Reports;
 
-use App\Filament\App\Widgets\Reports\ComingSoonWidget;
+use App\Filament\App\Widgets\Reports\Profitability\MarginLadderChartWidget;
+use App\Filament\App\Widgets\Reports\Profitability\MarginLeakageChartWidget;
+use App\Filament\App\Widgets\Reports\Profitability\MarginTrendChartWidget;
+use App\Filament\App\Widgets\Reports\Profitability\ProfitabilityKpiStatsWidget;
+use App\Filament\App\Widgets\Reports\Profitability\ProfitabilityPlMatrixWidget;
+use App\Filament\App\Widgets\Reports\Profitability\ProfitSalesScatterChartWidget;
 use BackedEnum;
 use Filament\Support\Icons\Heroicon;
 
@@ -23,7 +28,12 @@ class Profitability extends ReportPage
     public function getWidgets(): array
     {
         return [
-            ComingSoonWidget::class,
+            ProfitabilityKpiStatsWidget::class,
+            ProfitabilityPlMatrixWidget::class,
+            MarginLadderChartWidget::class,
+            MarginLeakageChartWidget::class,
+            MarginTrendChartWidget::class,
+            ProfitSalesScatterChartWidget::class,
         ];
     }
 }
