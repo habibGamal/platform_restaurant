@@ -9,6 +9,8 @@ Reports: 01 f8ea634, 02 ac67c45, 03 2ca1e7c, 04 9aa8f8e, 05 29f50ec, 06 544b922,
 
 Final full PHPUnit: 485 passed / 3360 assertions on platform_test_12 with 1GB memory. Targeted Pint and PHPStan pass. Fresh migrations and seed pass on platform_test_11. Developer database was not used for tests.
 
+Follow-up: operator organization user management added at `/admin/users`; see OPERATOR-USERS.md. Operators can create the first owner, edit tenant roles/passwords/branch access and filter users by organization. Operator accounts are excluded, tenant access is denied, foreign branch assignments are rejected and the last owner is protected. No migration required. Updated full PHPUnit: **495 passed / 3463 assertions** on platform_test_12; targeted Pint and PHPStan pass.
+
 Overview cutoff sales comparison is unavailable because the return contract lacks a reliable event timestamp. Group-level figures and ranks require group permission.
 
 ## POS (`D:/ai_rewrite_turbo_restaurant`, `feature/platform-connector`)
