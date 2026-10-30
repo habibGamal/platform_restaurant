@@ -8,6 +8,16 @@ use App\Models\User;
 
 class BranchPolicy
 {
+    public function before(User $user, string $ability): ?bool
+    {
+        return $user->hasRole('operator') ? true : null;
+    }
+
+    public function deleteAny(User $user): bool
+    {
+        return $user->can('branches.manage');
+    }
+
     public function viewAny(User $user): bool
     {
         return $user->can('analytics.view') || $user->can('branches.manage');

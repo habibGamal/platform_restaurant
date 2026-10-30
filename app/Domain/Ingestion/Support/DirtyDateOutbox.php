@@ -256,6 +256,10 @@ class DirtyDateOutbox
     public static function claimRecomputeFence(int $branchId, string $businessDate): int
     {
         return DB::transaction(function () use ($branchId, $businessDate): int {
+            if (DB::table('branches')->where('id', $branchId)->lockForUpdate()->first(['id']) === null) {
+                return 0;
+            }
+
             $now = Carbon::now();
             $fence = DB::table('ingest_recompute_fences')
                 ->where('branch_id', $branchId)
@@ -324,6 +328,10 @@ class DirtyDateOutbox
         $lockToken = (string) Str::uuid();
 
         return DB::transaction(function () use ($branchId, $businessDate, $leaseSeconds, $lockToken): ?string {
+            if (DB::table('branches')->where('id', $branchId)->lockForUpdate()->first(['id']) === null) {
+                return null;
+            }
+
             $now = Carbon::now();
             $fence = DB::table('ingest_recompute_fences')
                 ->where('branch_id', $branchId)

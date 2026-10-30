@@ -141,7 +141,7 @@ class BranchResource extends Resource
                 DeleteAction::make(),
             ])
             ->bulkActions([
-                DeleteBulkAction::make(),
+                DeleteBulkAction::make()->authorizeIndividualRecords(),
             ]);
     }
 

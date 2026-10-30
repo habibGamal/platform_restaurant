@@ -27,4 +27,10 @@ Two-process real MySQL backfill locking: competing owner waits beyond short leas
 
 ## Deployment follow-up
 
+Latest follow-up: branch deletion now cascades all branch warehouse, dimension and
+aggregate data and removes credentials/access/control rows. A queued ingest job
+removes raw batch files after commit. Apply migration
+2026_11_02_000009_cascade_branch_owned_data and restart workers; see
+BRANCH-DELETION.md for scope, business-date rules and verification.
+
 Apply both repos' new migrations and keep schedulers / platform ingest+aggregate workers running; see RECOVERY.md. No push, merge, or deployment was performed. External website and management API callers were not located/changed; they still require X-Api-Key / X-Management-Key per original handoff. POS branch client already sends its configured key.
