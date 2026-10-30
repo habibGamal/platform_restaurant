@@ -86,6 +86,46 @@ Targeted Pint and PHPStan pass.
 
 ## Validation boundaries
 
+### Queue contention and deleted branches
+
+ProcessIngestBatch and RecomputeBranchDay now allow unlimited lock-wait attempts
+(`tries = 0`) while limiting genuine uncaught errors to three (`maxExceptions = 3`).
+Laravel counts middleware releases as attempts: the previous three-attempt limit
+could exhaust waiting jobs before they ever processed a document. Recovery creates
+fresh jobs using the new policy. Old serialized payloads can retain their earlier
+maxTries value; redispatch received/stale batches with ingest:recover rather than
+assuming queue:retry changes their metadata. Aggregate jobs for deleted branches
+finish without requeueing or recreating fences.
+
+Restart long-lived workers after deploying. Keep timeout below retry_after. Do not
+increase retries to hide genuine handler/storage exceptions. Database-queue tests
+hold locks through five worker attempts, then verify successful processing, and
+verify that three real exceptions still fail a job.
+
+Local recovery on 2026-10-30: archived 15 failed entries at private local storage
+repairs/queue-failures/e7a20fbe-12b2-40f3-895e-7dedb660effb.json. Ten aggregate jobs
+belonged to deleted branch 1 and completed harmlessly when retried. Five ingest
+failures referenced branch 3 batches 98–102; 98 was already processed, and 99–102
+were still received. Fresh recovery jobs processed all four from their saved
+payloads. Archived failure entries were removed only after processing succeeded.
+
+The historical date repair also missed open POS shift 90. A guarded open-shift
+repair restored its opening/business date from historical created_at (2026-10-29)
+with the human's existing authorization, backed up its original row at the POS
+private local disk repairs/shift-dates/ca0b02bc-5605-4dba-9c64-00817077d463.json,
+and resent its related documents and old/new summaries.
+
+Verification against all 90 POS business dates: no missing completed orders with
+items, no warehouse/aggregate count differences. Branch 3 completed counts are
+94 (Aug 14), 69 (Aug 15), 72 (Aug 19), 94 (Aug 23), 118 (Aug 24), 52 (Oct 29).
+Twenty-two completed source orders have no items, including one on Aug 19; these
+remain validation rejections, not queue loss. All 67 batches were processed and
+both queues/failed_jobs were empty at verification.
+
+Platform targeted checks: 207 ingestion, deletion and aggregation tests passed;
+after the final missing-branch guard adjustment, 11 queue/deletion tests passed.
+POS repair/business-date/backfill tests: 24 passed. Targeted Pint/PHPStan pass.
+
 Cross-app verification uses a transient CLI HTTP-kernel bridge, real POS builders,
 isolated SQLite POS data, and `platform_test_10`. It exercises pairing, rotation,
 gzip batching, ingestion, metrics rebuild, overview values, and tenant boundaries.

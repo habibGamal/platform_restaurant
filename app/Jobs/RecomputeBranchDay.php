@@ -6,6 +6,7 @@ use App\Domain\Ingestion\Exceptions\FencedWorkerException;
 use App\Domain\Ingestion\Support\DirtyDateOutbox;
 use App\Domain\Metrics\Aggregation\BranchDayRebuilder;
 use App\Domain\Metrics\Contracts\BranchDayAggregator;
+use App\Models\Branch;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -21,6 +22,10 @@ class RecomputeBranchDay implements ShouldBeUniqueUntilProcessing, ShouldQueue
     use Queueable;
 
     public int $uniqueFor = 120;
+
+    public int $tries = 0;
+
+    public int $maxExceptions = 3;
 
     public function __construct(
         public int $branchId,
@@ -38,7 +43,9 @@ class RecomputeBranchDay implements ShouldBeUniqueUntilProcessing, ShouldQueue
     {
         $lockToken = DirtyDateOutbox::acquireRecomputeLock($this->branchId, $this->businessDate);
         if ($lockToken === null) {
-            $this->release(5);
+            if (Branch::withoutGlobalScopes()->whereKey($this->branchId)->exists()) {
+                $this->release(5);
+            }
 
             return;
         }
@@ -47,6 +54,9 @@ class RecomputeBranchDay implements ShouldBeUniqueUntilProcessing, ShouldQueue
             $snapshot = DirtyDateOutbox::getSnapshot($this->branchId, $this->businessDate);
 
             $fenceToken = DirtyDateOutbox::claimRecomputeFence($this->branchId, $this->businessDate);
+            if ($fenceToken === 0) {
+                return;
+            }
 
             if ($aggregator instanceof BranchDayRebuilder) {
                 $aggregator->recompute($this->branchId, $this->businessDate, $fenceToken);

@@ -24,7 +24,10 @@ class ProcessIngestBatch implements ShouldQueue
 
     public int $timeout = 60;
 
-    public int $tries = 3;
+    // Releasing for another batch's branch lock is not a processing failure.
+    public int $tries = 0;
+
+    public int $maxExceptions = 3;
 
     public static int $defaultLeaseDurationSeconds = 30;
 
