@@ -89,7 +89,12 @@ class DocumentRules
                 'data.service' => ['required_if:op,upsert', 'regex:'.self::DECIMAL_REGEX],
                 'data.total' => ['required_if:op,upsert', 'regex:'.self::DECIMAL_REGEX],
                 'data.profit' => ['required_if:op,upsert', 'regex:'.self::DECIMAL_REGEX],
-                'data.web_pos_diff' => ['required_if:op,upsert', 'regex:'.self::DECIMAL_REGEX],
+                'data.web_pos_diff' => [
+                    'exclude_unless:op,upsert',
+                    'required_if:data.type,web_delivery,web_takeaway',
+                    'nullable',
+                    'regex:'.self::DECIMAL_REGEX,
+                ],
                 'data.items' => ['required_if:op,upsert', 'array'],
                 'data.items.*.uuid' => ['required_if:op,upsert', 'string'],
                 'data.items.*.product_uuid' => ['required_if:op,upsert', 'string'],

@@ -40,6 +40,11 @@ Do not change a shared migration; if a task needs a new column, add a **new** mi
 Money = decimal string `"400.00"`, quantity = decimal string `"1.500"`, timestamps ISO-8601 with offset, dates `Y-m-d`.
 Every document: `{type, uuid, version (int), op ('upsert'|'delete'), occurred_at, data (null when op=delete)}`.
 
+Order `web_pos_diff` is required only for `web_delivery` and `web_takeaway` upserts.
+For other order types it may be omitted or null; when supplied, it must be a valid
+decimal. Missing/null values remain null in the warehouse. Delete documents do not
+require this field.
+
 | type | data keys | warehouse target |
 |---|---|---|
 | `order` | number, shift_uuid, business_date, type, status, payment_status, return_status, created_at, cashier_uuid, driver_uuid, customer_hash, region, sub_total, discount, tax, service, total, profit, web_pos_diff, items[] {uuid, product_uuid, product_ref, quantity, price, unit_cost, item_discount, item_discount_type, total}, payments[] {method, amount, shift_uuid, paid_at} | wh_orders (+ items, payments). Ingest computes `cogs` = Σ quantity × unit_cost, `items_discount` = Σ item_discount, `hour_of_day` and `weekday` from created_at (branch tz) — weekday of the **business_date** |

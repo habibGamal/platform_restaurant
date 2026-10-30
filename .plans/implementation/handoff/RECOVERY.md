@@ -36,6 +36,30 @@ Keep the POS scheduler enabled. It runs sync every minute, heartbeat every five
 minutes, and pruning daily. Old pending batches and batches referenced by retained
 outbox rows are preserved for recovery.
 
+## Orders rejected for missing web_pos_diff
+
+Deploy the platform validation fix first and restart its queue workers. This field
+is required only for web_delivery/web_takeaway upserts; other types may omit it or
+send null. No migration or POS code change is needed.
+
+Rejected POS rows have their batch_id cleared and remain unsent. They retry in new
+batches after backoff, or stop after ten attempts. On the POS connection page,
+use "إعادة محاولة الفاشل" followed by "مزامنة الآن" for stopped rows. Pending rows
+still in backoff retry automatically (up to sixty minutes).
+
+To immediately requeue only unsent orders affected by this error, use POS Tinker:
+
+```php
+App\Models\SyncOutbox::where('doc_type', 'order')
+    ->whereNull('sent_at')
+    ->where('last_error', 'like', '%web pos diff%')
+    ->update(['failed_at' => null, 'attempts' => 0, 'next_attempt_at' => null]);
+```
+
+Then run `php artisan platform:sync` on the POS. Do not delete ingestion history:
+old batch UUIDs retain their original responses, and old ingest_rejections remain
+historical records even after a successful resend.
+
 ## Validation boundaries
 
 Cross-app verification uses a transient CLI HTTP-kernel bridge, real POS builders,
