@@ -1,0 +1,52 @@
+# Connector and ingestion recovery
+
+## Platform
+
+Run migrations before using the new API. Run queue workers for both `ingest` and
+`aggregate`, and run Laravel's scheduler every minute. The scheduler invokes
+`ingest:recover` to redispatch received or abandoned batches and pending durable
+dirty-date records. `ingest:recover --sync` can rebuild pending aggregates directly.
+
+Batch receipt is serialized by branch; duplicate UUIDs return the stored public
+response. Accepted document indexes are persisted internally so a rejected recipe
+cannot be processed merely because its product shares the same UUID.
+
+Warehouse writes and dirty-date generations commit together. Aggregate workers
+capture generations before rebuilding and acknowledge only those generations.
+Updates arriving during a rebuild remain pending. Batch claims and recomputation
+fences prevent superseded workers from acknowledging newer work. MySQL row locks
+serialize the warehouse mutation/ownership check and the aggregate rebuild itself;
+correctness does not depend solely on a PHP timeout or an expiring cache lock.
+
+The overview cannot provide sales-after-returns comparisons through an hourly
+cutoff until the source contract supplies a trustworthy return event timestamp.
+It displays that comparison as unavailable; hourly order count and average ticket
+comparisons remain available.
+
+## POS
+
+Pairing credentials are persisted before initial backfill because the remote
+pairing code is single-use. Catalog and history progress is durable and retried
+by `platform:sync`. `PlatformConnection::active()` remains a lookup without backfill
+side effects. Each backfill step holds the connection row lock through ownership
+validation, outbox writes, and its checkpoint. A crashed step rolls back and can be
+reclaimed; an expired claimant cannot write after another owner takes over.
+
+Keep the POS scheduler enabled. It runs sync every minute, heartbeat every five
+minutes, and pruning daily. Old pending batches and batches referenced by retained
+outbox rows are preserved for recovery.
+
+## Validation boundaries
+
+Cross-app verification uses a transient CLI HTTP-kernel bridge, real POS builders,
+isolated SQLite POS data, and `platform_test_10`. It exercises pairing, rotation,
+gzip batching, ingestion, metrics rebuild, overview values, and tenant boundaries.
+It does not exercise an actual network server, TLS, browser assets, or deployment.
+
+A separate two-process MySQL test held a row lock beyond a deliberately short lease,
+verified competing ownership was blocked, killed a worker during its transaction,
+and verified rollback and recovery. Its dedicated database was removed afterward.
+
+External website callers must provide `X-Api-Key`; management callers must provide
+`X-Management-Key`. The POS branch client already sends its configured `WEB_API_KEY`.
+The external callers were not located or changed as part of these two repositories.

@@ -34,3 +34,7 @@ Repos: platform `D:\platform-restaurants` (branch `main`) · POS `D:\ai_rewrite_
 - larament baseline (your commit 08fc892) already has 114 failing tests (list in orchestrator scratchpad); connector work is checked for NEW failures only.
 - POS-B2: Driver has no uuid, so order payload driver_uuid is always null (no core report uses it).
 - 2026-10-29 ~22:15 EDT: agy Gemini 3.8 quota exhausted ("Individual quota reached", resets ~3h50m later). claude-sonnet-4-6 via agy still available.
+
+## Codex completion (2026-10-30)
+
+All reports 01–10, ingestion, and POS connector tasks are implemented and committed. The earlier status table is historical. See handoff/CODEX-PROGRESS.md for final commits and validation; handoff/RECOVERY.md for runtime requirements and limitations.
