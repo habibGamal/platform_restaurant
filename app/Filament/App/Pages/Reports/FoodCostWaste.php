@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace App\Filament\App\Pages\Reports;
 
-use App\Filament\App\Widgets\Reports\ComingSoonWidget;
+use App\Filament\App\Widgets\Reports\FoodCostWaste\FoodCostBranchMatrixWidget;
+use App\Filament\App\Widgets\Reports\FoodCostWaste\FoodCostKpiOverviewWidget;
+use App\Filament\App\Widgets\Reports\FoodCostWaste\FoodCostTrendChartWidget;
+use App\Filament\App\Widgets\Reports\FoodCostWaste\PurchasePriceMovementTableWidget;
+use App\Filament\App\Widgets\Reports\FoodCostWaste\StocktakingVarianceTableWidget;
+use App\Filament\App\Widgets\Reports\FoodCostWaste\TopWastedItemsTableWidget;
 use BackedEnum;
 use Filament\Support\Icons\Heroicon;
 
@@ -23,7 +28,12 @@ class FoodCostWaste extends ReportPage
     public function getWidgets(): array
     {
         return [
-            ComingSoonWidget::class,
+            FoodCostKpiOverviewWidget::class,
+            FoodCostBranchMatrixWidget::class,
+            FoodCostTrendChartWidget::class,
+            TopWastedItemsTableWidget::class,
+            StocktakingVarianceTableWidget::class,
+            PurchasePriceMovementTableWidget::class,
         ];
     }
 }
