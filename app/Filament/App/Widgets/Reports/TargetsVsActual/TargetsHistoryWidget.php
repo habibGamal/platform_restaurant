@@ -10,12 +10,19 @@ use App\Domain\Metrics\Reports\TargetsVsActualReport\TargetHistoryRow;
 use App\Filament\App\Widgets\Reports\BaseReportViewWidget;
 use App\Models\User;
 use App\Support\Format;
+use Filament\Tables\Table;
 
 class TargetsHistoryWidget extends BaseReportViewWidget
 {
     protected ?string $heading = 'سجل تحقيق المستهدفات التاريخي (آخر 12 شهراً)';
 
     protected int|string|array $columnSpan = 'full';
+
+    public function table(Table $table): Table
+    {
+        return parent::table($table)
+            ->recordClasses(fn (array $record): ?string => ($record['_is_group'] ?? false) ? 'bg-primary-50/40 dark:bg-primary-950/20 font-semibold' : null);
+    }
 
     protected function getColumns(): array
     {
@@ -51,7 +58,8 @@ class TargetsHistoryWidget extends BaseReportViewWidget
 
         $rows = [];
         foreach ($data->historyRows as $row) {
-            $rows[] = $this->formatRow($row, $data->historyMonths);
+            $recordKey = $row->isGroup ? 'group' : 'branch_'.($row->branchId ?? '0');
+            $rows[$recordKey] = $this->formatRow($row, $data->historyMonths);
         }
 
         return $rows;
@@ -59,7 +67,7 @@ class TargetsHistoryWidget extends BaseReportViewWidget
 
     /**
      * @param  list<string>  $historyMonths
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     private function formatRow(TargetHistoryRow $row, array $historyMonths): array
     {
@@ -67,18 +75,21 @@ class TargetsHistoryWidget extends BaseReportViewWidget
             ? 'font-bold text-primary-600 dark:text-primary-400'
             : 'font-semibold text-gray-900 dark:text-white';
 
-        $branchHtml = "<span class='{$branchClass}'>".e($row->branchName).'</span>';
+        $branchHtml = "<span class='{$branchClass} whitespace-nowrap'>".e($row->branchName).'</span>';
         if ($row->isGroup) {
-            $branchHtml .= ' <span class="text-xs text-gray-400 font-normal">(مجمّع)</span>';
+            $branchHtml .= ' <span class="text-xs text-gray-400 font-normal whitespace-nowrap">(مجمّع)</span>';
         }
 
-        $formatted = ['branch' => $branchHtml];
+        $formatted = [
+            '_is_group' => $row->isGroup,
+            'branch' => $branchHtml,
+        ];
 
         foreach ($historyMonths as $mKey) {
             $cell = $row->cells[$mKey] ?? null;
 
             if ($cell === null || $cell->status === 'no_target' || $cell->achievement === null) {
-                $formatted[$mKey] = '<span class="text-xs text-gray-400">—</span>';
+                $formatted[$mKey] = '<span class="text-xs text-gray-400 whitespace-nowrap">—</span>';
 
                 continue;
             }
@@ -90,7 +101,7 @@ class TargetsHistoryWidget extends BaseReportViewWidget
             };
 
             $tooltip = 'المحقق: '.Format::money($cell->actual).' / المستهدف: '.Format::money($cell->target);
-            $formatted[$mKey] = "<span class='inline-block px-2.5 py-1 rounded text-xs font-semibold {$badgeColor} dir-ltr' title='".e($tooltip)."'>".Format::percent($cell->achievement).'</span>';
+            $formatted[$mKey] = "<span class='inline-block px-2.5 py-1 rounded text-xs font-semibold {$badgeColor} whitespace-nowrap' title='".e($tooltip)."'><span class='inline-block dir-ltr'>".Format::percent($cell->achievement).'</span></span>';
         }
 
         return $formatted;

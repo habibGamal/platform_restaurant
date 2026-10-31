@@ -9,10 +9,17 @@ use App\Domain\Metrics\Reports\SalesComparisonReport;
 use App\Filament\App\Widgets\Reports\BaseReportViewWidget;
 use App\Models\User;
 use App\Support\Format;
+use Filament\Tables\Table;
 
 class SalesKpiMatrixWidget extends BaseReportViewWidget
 {
     protected ?string $heading = 'مصفوفة مؤشرات الأداء للفروع (Side-by-Side Matrix)';
+
+    public function table(Table $table): Table
+    {
+        return parent::table($table)
+            ->recordClasses(fn (array $record): ?string => ($record['_is_group'] ?? false) ? 'bg-primary-50/50 dark:bg-primary-950/20 font-semibold' : null);
+    }
 
     protected function getColumns(): array
     {
@@ -42,11 +49,14 @@ class SalesKpiMatrixWidget extends BaseReportViewWidget
 
         $rows = [];
         foreach ($matrix as $row) {
-            $branchHtml = $row->isGroupAverage
-                ? '<div class="font-bold text-primary-600 dark:text-primary-400 flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full bg-primary-500"></span>'.e($row->branchName).'</div>'
-                : '<div class="font-semibold text-gray-900 dark:text-white">'.e($row->branchName).'</div>';
+            $recordKey = $row->isGroupAverage ? 'group_avg' : 'branch_'.($row->branchId ?? '0');
 
-            $rows[] = [
+            $branchHtml = $row->isGroupAverage
+                ? '<div class="font-bold text-primary-600 dark:text-primary-400 flex items-center gap-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full bg-primary-500 shrink-0"></span>'.e($row->branchName).'</div>'
+                : '<div class="font-semibold text-gray-900 dark:text-white whitespace-nowrap">'.e($row->branchName).'</div>';
+
+            $rows[$recordKey] = [
+                '_is_group' => $row->isGroupAverage,
                 'branch' => $branchHtml,
                 'sales' => $this->formatCell($row->sales, $row->salesGrowth, 'money', true),
                 'orders' => $this->formatCell($row->orders !== null ? (float) $row->orders : null, $row->ordersGrowth, 'number', true),
@@ -54,7 +64,7 @@ class SalesKpiMatrixWidget extends BaseReportViewWidget
                 'discounts' => $this->formatCell($row->discounts, $row->discountsGrowth, 'money', false),
                 'cancel_rate' => $this->formatCell($row->cancelRate, $row->cancelRateGrowth, 'percent', false),
                 'return_rate' => $this->formatCell($row->returnRate, $row->returnRateGrowth, 'percent', false),
-                'days' => '<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-300 font-medium">'.Format::number((float) $row->daysWithData).' يوم</span>',
+                'days' => '<span class="inline-block text-xs px-2.5 py-1 rounded-full bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-300 font-medium whitespace-nowrap">'.Format::number((float) $row->daysWithData).' يوم</span>',
             ];
         }
 
@@ -70,7 +80,7 @@ class SalesKpiMatrixWidget extends BaseReportViewWidget
         };
 
         if ($growth === null) {
-            return "<div>{$formattedVal}</div>";
+            return "<div class=\"font-medium text-gray-950 dark:text-white whitespace-nowrap\">{$formattedVal}</div>";
         }
 
         $growthFormatted = Format::growth($growth);
@@ -87,6 +97,9 @@ class SalesKpiMatrixWidget extends BaseReportViewWidget
                 : 'text-emerald-600 dark:text-emerald-400 font-semibold';
         }
 
-        return "<div>{$formattedVal} <span class='text-xs {$colorClass} inline-block ms-1 dir-ltr'>{$growthFormatted}</span></div>";
+        return "<div class=\"space-y-0.5 whitespace-nowrap\">
+            <div class=\"font-medium text-gray-950 dark:text-white\">{$formattedVal}</div>
+            <div class=\"text-xs {$colorClass}\"><span class=\"inline-block dir-ltr font-semibold\">{$growthFormatted}</span></div>
+        </div>";
     }
 }

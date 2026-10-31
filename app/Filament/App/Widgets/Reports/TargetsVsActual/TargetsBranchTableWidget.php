@@ -10,10 +10,17 @@ use App\Domain\Metrics\Reports\TargetsVsActualReport\TargetBranchTableRow;
 use App\Filament\App\Widgets\Reports\BaseReportViewWidget;
 use App\Models\User;
 use App\Support\Format;
+use Filament\Tables\Table;
 
 class TargetsBranchTableWidget extends BaseReportViewWidget
 {
     protected ?string $heading = 'مقارنة المستهدف بالمحقق حسب الفرع والمؤشر';
+
+    public function table(Table $table): Table
+    {
+        return parent::table($table)
+            ->recordClasses(fn (array $record): ?string => ($record['_is_group'] ?? false) ? 'bg-primary-50/40 dark:bg-primary-950/20 font-semibold' : null);
+    }
 
     protected function getColumns(): array
     {
@@ -49,14 +56,15 @@ class TargetsBranchTableWidget extends BaseReportViewWidget
 
         $rows = [];
         foreach ($branchRows as $row) {
-            $rows[] = $this->formatRow($row, $canManageTargets);
+            $recordKey = ($row->isGroup ? 'group' : 'branch_'.($row->branchId ?? '0')).'_'.$row->metric;
+            $rows[$recordKey] = $this->formatRow($row, $canManageTargets);
         }
 
         return $rows;
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     private function formatRow(TargetBranchTableRow $row, bool $canManageTargets): array
     {
@@ -67,20 +75,21 @@ class TargetsBranchTableWidget extends BaseReportViewWidget
             ? 'font-bold text-primary-600 dark:text-primary-400'
             : 'font-semibold text-gray-900 dark:text-white';
 
-        $branchHtml = "<span class='{$branchClass}'>".e($row->branchName).'</span>';
+        $branchHtml = "<span class='{$branchClass} whitespace-nowrap'>".e($row->branchName).'</span>';
         if ($isGroup) {
-            $branchHtml .= ' <span class="text-xs text-gray-400 font-normal">(مجمّع)</span>';
+            $branchHtml .= ' <span class="text-xs text-gray-400 font-normal whitespace-nowrap">(مجمّع)</span>';
         }
 
-        $metricHtml = '<span class="text-xs font-medium text-gray-700 dark:text-gray-300">'.e($row->metricLabel).'</span>';
+        $metricHtml = '<span class="text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">'.e($row->metricLabel).'</span>';
 
         if ($row->status === 'no_target') {
-            $statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-400">لم يُحدد مستهدف</span>';
+            $statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-400 whitespace-nowrap">لم يُحدد مستهدف</span>';
             if ($canManageTargets && ! $isGroup) {
-                $statusBadge .= ' <a href="/app/targets" class="text-xs text-primary-600 hover:underline mr-1">(تحديد)</a>';
+                $statusBadge .= ' <a href="/app/targets" class="text-xs text-primary-600 hover:underline mr-1 whitespace-nowrap">(تحديد)</a>';
             }
 
             return [
+                '_is_group' => $isGroup,
                 'branch' => $branchHtml,
                 'metric' => $metricHtml,
                 'target_month' => '—',
@@ -105,8 +114,8 @@ class TargetsBranchTableWidget extends BaseReportViewWidget
 
         if ($metric === 'food_cost_pct') {
             $achievementStr = $row->status === 'within'
-                ? '<span class="text-emerald-600 dark:text-emerald-400 font-semibold">ضمن السقف</span>'
-                : '<span class="text-rose-600 dark:text-rose-400 font-semibold">تجاوز السقف</span>';
+                ? '<span class="text-emerald-600 dark:text-emerald-400 font-semibold whitespace-nowrap">ضمن السقف</span>'
+                : '<span class="text-rose-600 dark:text-rose-400 font-semibold whitespace-nowrap">تجاوز السقف</span>';
             $projectedAchStr = '—';
             $requiredDailyStr = '—';
             $currentDailyStr = '—';
@@ -116,22 +125,23 @@ class TargetsBranchTableWidget extends BaseReportViewWidget
                 ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
                 : ($achPercent >= 90.0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-rose-600 dark:text-rose-400 font-semibold');
 
-            $achievementStr = "<span class='{$achClass} dir-ltr'>".Format::percent($row->achievementToDate).'</span>';
-            $projectedAchStr = "<span class='dir-ltr'>".Format::percent($row->projectedAchievement).'</span>';
+            $achievementStr = "<span class='{$achClass} whitespace-nowrap'><span class='inline-block dir-ltr'>".Format::percent($row->achievementToDate).'</span></span>';
+            $projectedAchStr = "<span class='whitespace-nowrap'><span class='inline-block dir-ltr'>".Format::percent($row->projectedAchievement).'</span></span>';
             $requiredDailyStr = $this->formatMetricValue($metric, $row->requiredDailyAverage);
             $currentDailyStr = $this->formatMetricValue($metric, $row->currentDailyAverage);
         }
 
         $statusBadge = match ($row->status) {
-            'on_track' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400">✓ على المسار</span>',
-            'at_risk' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400">⚠️ معرض للخطر</span>',
-            'behind' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400">✕ متأخر</span>',
-            'within' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400">✓ ضمن السقف</span>',
-            'above' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400">✕ تجاوز السقف</span>',
-            default => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-400">لم يُحدد مستهدف</span>',
+            'on_track' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 whitespace-nowrap">✓ على المسار</span>',
+            'at_risk' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400 whitespace-nowrap">⚠️ معرض للخطر</span>',
+            'behind' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400 whitespace-nowrap">✕ متأخر</span>',
+            'within' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 whitespace-nowrap">✓ ضمن السقف</span>',
+            'above' => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400 whitespace-nowrap">✕ تجاوز السقف</span>',
+            default => '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-400 whitespace-nowrap">لم يُحدد مستهدف</span>',
         };
 
         return [
+            '_is_group' => $isGroup,
             'branch' => $branchHtml,
             'metric' => $metricHtml,
             'target_month' => $targetMonthStr,
@@ -153,10 +163,12 @@ class TargetsBranchTableWidget extends BaseReportViewWidget
             return '—';
         }
 
-        return match ($metric) {
+        $formatted = match ($metric) {
             'food_cost_pct' => Format::percent($val),
             'orders' => Format::number($val),
             default => Format::money($val),
         };
+
+        return "<span class=\"whitespace-nowrap font-medium\">{$formatted}</span>";
     }
 }

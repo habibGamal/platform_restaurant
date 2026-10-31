@@ -45,24 +45,28 @@ class DiscountIntensityWidget extends BaseReportViewWidget
             if ($row->deltaDiscountPct !== null) {
                 $color = $row->deltaDiscountPct > 0 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ($row->deltaDiscountPct < 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-gray-500');
                 $sign = $row->deltaDiscountPct > 0 ? '+' : '';
-                $deltaHtml = "<span class='{$color} dir-ltr'>{$sign}{$row->deltaDiscountPct}%</span>";
+                $deltaHtml = "<span class='{$color} whitespace-nowrap'><span class='inline-block dir-ltr'>{$sign}{$row->deltaDiscountPct}%</span></span>";
             }
 
             $pctVal = ($row->discountPct ?? 0.0) * 100;
             if ($pctVal > 15.0) {
-                $statusHtml = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400">مرتفع جداً (>15%)</span>';
+                $statusHtml = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400 whitespace-nowrap">مرتفع جداً (>15%)</span>';
             } elseif ($pctVal > 8.0) {
-                $statusHtml = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">متوسط (8-15%)</span>';
+                $statusHtml = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 whitespace-nowrap">متوسط (8-15%)</span>';
             } else {
-                $statusHtml = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">منضبط (≤8%)</span>';
+                $statusHtml = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 whitespace-nowrap">منضبط (≤8%)</span>';
             }
 
-            $rows[] = [
-                'branch' => '<span class="font-semibold text-gray-900 dark:text-white">'.e($row->branchName).'</span>',
-                'gross_sales' => Format::money($row->grossSales),
-                'discounts' => Format::money($row->discounts),
-                'discount_pct' => '<span class="font-bold text-gray-900 dark:text-white">'.Format::percent($row->discountPct).'</span>',
-                'comp_discount_pct' => Format::percent($row->compDiscountPct),
+            $compDiscountPct = $row->compDiscountPct !== null
+                ? '<span class="inline-block dir-ltr font-medium">'.Format::percent($row->compDiscountPct).'</span>'
+                : '—';
+
+            $rows['branch_'.$row->branchId] = [
+                'branch' => '<span class="font-semibold text-gray-900 dark:text-white whitespace-nowrap">'.e($row->branchName).'</span>',
+                'gross_sales' => '<span class="font-medium whitespace-nowrap">'.Format::money($row->grossSales).'</span>',
+                'discounts' => '<span class="font-medium whitespace-nowrap">'.Format::money($row->discounts).'</span>',
+                'discount_pct' => '<span class="font-bold text-gray-900 dark:text-white whitespace-nowrap"><span class="inline-block dir-ltr">'.Format::percent($row->discountPct).'</span></span>',
+                'comp_discount_pct' => $compDiscountPct,
                 'delta_pct' => $deltaHtml,
                 'status' => $statusHtml,
             ];

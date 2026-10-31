@@ -148,6 +148,26 @@ class PageTest extends TestCase
         $this->get('/app/reports/sales')->assertForbidden();
     }
 
+    public function test_native_report_tables_escape_branch_labels_and_use_stable_record_keys(): void
+    {
+        $name = '<img src=x onerror="alert(1)"> Branch A';
+        $this->fixture->branchA->update(['name' => $name]);
+        $this->actingAs($this->fixture->managerA);
+
+        foreach ([SalesKpiMatrixWidget::class, GrowthDecompositionTableWidget::class, DiscountIntensityWidget::class] as $widget) {
+            $component = Livewire::test($widget, ['pageFilters' => ['preset' => 'last_week']])
+                ->assertSuccessful()
+                ->assertSee('fi-ta', escape: false)
+                ->assertSee('Branch A')
+                ->assertDontSee($name, escape: false)
+                ->assertDontSee('Branch B');
+
+            $this->assertStringContainsString($name, html_entity_decode(strip_tags($component->html()), ENT_QUOTES | ENT_HTML5));
+            $records = $component->instance()->getTableRecords();
+            $this->assertSame(['branch_'.$this->fixture->branchA->id], $records->keys()->all());
+        }
+    }
+
     private function createBranchCWithDailyData(): Branch
     {
         $branchC = Branch::create([
