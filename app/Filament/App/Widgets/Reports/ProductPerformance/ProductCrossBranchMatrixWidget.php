@@ -10,6 +10,8 @@ use App\Domain\Metrics\Reports\ProductPerformanceReport\CrossBranchMatrix;
 use App\Filament\App\Widgets\Reports\BaseReportViewWidget;
 use App\Models\User;
 use App\Support\Format;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Table;
 
 class ProductCrossBranchMatrixWidget extends BaseReportViewWidget
 {
@@ -19,7 +21,9 @@ class ProductCrossBranchMatrixWidget extends BaseReportViewWidget
 
     public function setMetric(string $metric): void
     {
-        $this->metric = $metric;
+        if (in_array($metric, ['qty', 'sales'], true)) {
+            $this->metric = $metric;
+        }
     }
 
     private function getMatrixData(): CrossBranchMatrix
@@ -34,6 +38,35 @@ class ProductCrossBranchMatrixWidget extends BaseReportViewWidget
         $report = ProductPerformanceReport::for($query);
 
         return $report->crossBranchMatrix($this->metric);
+    }
+
+    public function table(Table $table): Table
+    {
+        return parent::table($table)
+            ->heading(null);
+    }
+
+    protected function getTableColumnsForRecords(): array
+    {
+        $columns = [];
+
+        foreach ($this->getColumns() as $key => $label) {
+            $minWidth = match ($key) {
+                'name' => 'min-w-[180px]',
+                'category' => 'min-w-[120px]',
+                'total' => 'min-w-[140px]',
+                default => 'min-w-[140px]',
+            };
+
+            $columns[] = TextColumn::make($key)
+                ->label($label)
+                ->html()
+                ->placeholder('—')
+                ->extraHeaderAttributes(['class' => "whitespace-nowrap {$minWidth}"])
+                ->extraCellAttributes(['class' => 'whitespace-nowrap']);
+        }
+
+        return $columns;
     }
 
     protected function getColumns(): array

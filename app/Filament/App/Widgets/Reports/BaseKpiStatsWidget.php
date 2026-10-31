@@ -15,6 +15,13 @@ abstract class BaseKpiStatsWidget extends BaseStatsOverviewWidget
 
     protected static bool $isLazy = false;
 
+    protected int|array|null $columns = [
+        'default' => 1,
+        'sm' => 2,
+        'md' => 3,
+        'xl' => 4,
+    ];
+
     /**
      * @param  array<float|int>  $sparkline
      */

@@ -65,6 +65,26 @@ class PageTest extends TestCase
         Livewire::test(ProfitSalesScatterChartWidget::class)->assertSuccessful();
     }
 
+    public function test_native_matrix_preserves_its_interactive_controls(): void
+    {
+        $this->actingAs($this->fixture->owner);
+
+        Livewire::test(ProfitabilityPlMatrixWidget::class, ['pageFilters' => ['preset' => 'last_week']])
+            ->assertSee('fi-ta', escape: false)
+            ->assertSee('Branch A')
+            ->call('setLaborBasis', 'allocated')
+            ->assertSet('laborBasis', 'allocated')
+            ->assertSuccessful()
+            ->call('toggleExcludeInventoryVariance')
+            ->assertSet('excludeInventoryVariance', true)
+            ->assertSuccessful()
+            ->call('toggleComparisonDelta')
+            ->assertSet('showComparisonDelta', false)
+            ->assertSuccessful()
+            ->call('setLaborBasis', 'invalid')
+            ->assertSet('laborBasis', 'allocated');
+    }
+
     public function test_manager_a_widgets_never_contain_branch_b_name_or_figures(): void
     {
         $this->actingAs($this->fixture->managerA);

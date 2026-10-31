@@ -22,6 +22,7 @@ use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\EmbeddedSchema;
+use Filament\Schemas\Components\Livewire as LivewireComponent;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
@@ -46,6 +47,26 @@ abstract class ReportPage extends BaseDashboard
         $user = auth()->user();
 
         return $user !== null && $user->can('analytics.view');
+    }
+
+    public function getColumns(): int|array
+    {
+        return 1;
+    }
+
+    public function getWidgetsSchemaComponents(array $widgets, array $data = []): array
+    {
+        $components = parent::getWidgetsSchemaComponents($widgets, $data);
+        $filterKey = hash('sha256', json_encode($this->filters, JSON_THROW_ON_ERROR));
+
+        // Recreate lazy placeholders too, so they cannot load an older applied period.
+        foreach ($components as $component) {
+            if ($component instanceof LivewireComponent) {
+                $component->key($component->getKey(isAbsolute: false).'-'.$filterKey);
+            }
+        }
+
+        return $components;
     }
 
     /**

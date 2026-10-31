@@ -12,7 +12,12 @@ use App\Domain\Metrics\Reports\ProfitabilityReport\ProfitabilityMetricComparison
 use App\Domain\Metrics\Reports\ProfitabilityReport\ProfitabilityReportData;
 use App\Filament\App\Widgets\Reports\BaseReportViewWidget;
 use App\Models\User;
+use App\Support\BranchColor;
 use App\Support\Format;
+use Filament\Tables\Columns\Column;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Table;
+use Illuminate\Support\HtmlString;
 
 class ProfitabilityPlMatrixWidget extends BaseReportViewWidget
 {
@@ -86,7 +91,7 @@ class ProfitabilityPlMatrixWidget extends BaseReportViewWidget
         }
 
         if ($reportData->group !== null) {
-            $columns['group'] = 'الإجمالي';
+            $columns['group'] = 'الإجمالي (المجموعة)';
         }
 
         return $columns;
@@ -102,20 +107,91 @@ class ProfitabilityPlMatrixWidget extends BaseReportViewWidget
         $rows = [];
 
         foreach ($definitions as $key => $def) {
-            $row = ['metric' => $def['label']];
+            $row = [
+                '_key' => $key,
+                'metric' => $def['label'],
+            ];
 
             foreach ($reportData->branches as $branchId => $branch) {
-                $row["branch_{$branchId}"] = $this->formatCellForContract($branch, $key, $def);
+                $row["branch_{$branchId}"] = $this->formatCellHtml($branch, $key, $def);
             }
 
             if ($reportData->group !== null) {
-                $row['group'] = $this->formatCellForContract($reportData->group, $key, $def);
+                $row['group'] = $this->formatCellHtml($reportData->group, $key, $def);
             }
 
             $rows[$key] = $row;
         }
 
         return $rows;
+    }
+
+    public function table(Table $table): Table
+    {
+        return parent::table($table)
+            ->heading(null)
+            ->recordClasses(function (array $record): ?string {
+                $rowKey = $record['_key'] ?? null;
+                $definitions = $this->getRowDefinitions();
+                $def = $rowKey ? ($definitions[$rowKey] ?? null) : null;
+                if (! $def) {
+                    return null;
+                }
+
+                $isHighlight = (bool) ($def['is_highlight'] ?? false);
+                $isNetProfit = (bool) ($def['is_net_profit'] ?? false);
+
+                if ($isNetProfit) {
+                    return 'bg-primary-50/50 dark:bg-primary-950/30 font-bold border-t-2 border-primary-500/40';
+                }
+
+                if ($isHighlight) {
+                    return 'bg-emerald-50/40 dark:bg-emerald-950/20 font-semibold';
+                }
+
+                return null;
+            });
+    }
+
+    /**
+     * @return array<Column>
+     */
+    protected function getTableColumnsForRecords(): array
+    {
+        $reportData = $this->getReportData();
+        $columns = [
+            TextColumn::make('metric')
+                ->label('البند')
+                ->html()
+                ->extraHeaderAttributes(['class' => 'whitespace-nowrap min-w-[200px]'])
+                ->extraCellAttributes(['class' => 'whitespace-nowrap font-medium text-gray-900 dark:text-gray-100']),
+        ];
+
+        foreach ($reportData->branches as $branchId => $branch) {
+            $color = BranchColor::for($branchId);
+            $warning = $branch->hasNoExpenses ? ' <span class="text-[10px] text-danger-600 bg-danger-50 dark:bg-danger-950/50 px-1 rounded" title="لا توجد مصروفات مسجلة">⚠️</span>' : '';
+            $headerHtml = new HtmlString(
+                '<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: '.$color.'"></span><span>'.e($branch->branchName).'</span>'.$warning.'</div>'
+            );
+
+            $columns[] = TextColumn::make("branch_{$branchId}")
+                ->label($headerHtml)
+                ->html()
+                ->placeholder('—')
+                ->extraHeaderAttributes(['class' => 'whitespace-nowrap min-w-[150px]'])
+                ->extraCellAttributes(['class' => 'whitespace-nowrap']);
+        }
+
+        if ($reportData->group !== null) {
+            $columns[] = TextColumn::make('group')
+                ->label('الإجمالي (المجموعة)')
+                ->html()
+                ->placeholder('—')
+                ->extraHeaderAttributes(['class' => 'whitespace-nowrap min-w-[160px] font-bold'])
+                ->extraCellAttributes(['class' => 'whitespace-nowrap font-semibold bg-gray-50/60 dark:bg-white/5']);
+        }
+
+        return $columns;
     }
 
     /**
@@ -208,18 +284,29 @@ class ProfitabilityPlMatrixWidget extends BaseReportViewWidget
     /**
      * @param  array<string, mixed>  $def
      */
-    private function formatCellForContract(BranchProfitabilityData $branch, string $key, array $def): string
+    private function formatCellHtml(BranchProfitabilityData $branch, string $key, array $def): string
     {
-        $val = $branch->{$key} ?? null;
-        if ($val === null) {
-            return '—';
+        $cell = $this->formatCell($branch, $key, $def);
+        if ($cell['primary'] === '—') {
+            return '<span class="text-gray-400 dark:text-gray-600">—</span>';
         }
 
-        if ($def['is_money']) {
-            return Format::money((float) $val, 2);
+        $html = '<div class="flex flex-col"><span class="text-sm font-medium">'.e($cell['primary']).'</span>';
+
+        $subItems = [];
+        if ($cell['pctOfSales'] !== null) {
+            $subItems[] = '<span>'.e($cell['pctOfSales']).'</span>';
+        }
+        if ($cell['delta'] !== null) {
+            $subItems[] = '<span class="'.e($cell['deltaColor']).' font-semibold">'.e($cell['delta']).'</span>';
         }
 
-        return Format::percent((float) $val, 1);
+        if (! empty($subItems)) {
+            $html .= '<div class="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">'.implode('', $subItems).'</div>';
+        }
+        $html .= '</div>';
+
+        return $html;
     }
 
     /**

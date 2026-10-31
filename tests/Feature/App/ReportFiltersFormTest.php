@@ -429,4 +429,22 @@ class ReportFiltersFormTest extends TestCase
             ->call('applyFilters')
             ->assertHasErrors(['draftFilters.preset']);
     }
+
+    public function test_lazy_widget_keys_only_change_when_applied_filters_change(): void
+    {
+        $owner = User::factory()->forOrganization($this->organizationA)->create();
+        $owner->assignRole('org_owner');
+        $this->actingAs($owner);
+
+        $component = Livewire::test(Overview::class);
+        $keys = fn (): array => array_map(fn ($widget): ?string => $widget->getKey(isAbsolute: false), $component->instance()->getWidgetsSchemaComponents($component->instance()->getWidgets()));
+        $initialKeys = $keys();
+
+        $component->set('draftFilters.preset', 'last_30_days');
+        $this->assertSame($initialKeys, $keys());
+        $component->call('applyFilters')->assertHasNoErrors();
+        $this->assertNotSame($initialKeys, $keys());
+        $component->call('resetFilters')->assertHasNoErrors();
+        $this->assertSame($initialKeys, $keys());
+    }
 }

@@ -50,6 +50,22 @@ class PageTest extends TestCase
         $this->get(Overview::getUrl())->assertSuccessful();
     }
 
+    public function test_freshness_uses_a_full_width_native_status_table(): void
+    {
+        $this->actingAs($this->fixture->managerA);
+
+        $component = Livewire::test(OverviewDataFreshnessWidget::class)
+            ->assertSee('fi-ta', escape: false)
+            ->assertSee('آخر مزامنة')
+            ->assertSee('الحالة')
+            ->assertSee('Branch A')
+            ->assertDontSee('Branch B')
+            ->assertSee('تقرير صحة البيانات');
+
+        $this->assertSame('full', $component->instance()->getColumnSpan());
+        $this->assertSame(1, app(Overview::class)->getColumns());
+    }
+
     public function test_analyst_can_open_overview_page_and_render_all_widgets(): void
     {
         $this->actingAs($this->fixture->analyst);

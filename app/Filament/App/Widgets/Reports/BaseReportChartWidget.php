@@ -14,6 +14,8 @@ abstract class BaseReportChartWidget extends ChartWidget
 
     protected static bool $isLazy = true;
 
+    protected ?string $maxHeight = '280px';
+
     /**
      * @param  array<float|int>  $data
      * @param  array<string, mixed>  $extra
