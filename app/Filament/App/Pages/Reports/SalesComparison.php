@@ -28,6 +28,16 @@ class SalesComparison extends ReportPage
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowTrendingUp;
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDefaultFilters(): array
+    {
+        return array_merge(parent::getDefaultFilters(), [
+            'channel' => null,
+        ]);
+    }
+
     public function filtersForm(Schema $schema): Schema
     {
         $schema = parent::filtersForm($schema);

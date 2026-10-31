@@ -30,22 +30,16 @@ class ShiftsWeekdays extends ReportPage
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClock;
 
-    public function mount(): void
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDefaultFilters(): array
     {
-        parent::mount();
-
-        if (! isset($this->filters['preset'])) {
-            $this->filters['preset'] = PeriodPreset::last_8_weeks->value;
-        }
-
-        if (! isset($this->filters['exclude_events'])) {
-            $this->filters['exclude_events'] = true;
-        }
-
-        if (request()->has('exclude_events')) {
-            $val = request()->query('exclude_events');
-            $this->filters['exclude_events'] = ($val === '1' || $val === 'true');
-        }
+        return array_merge(parent::getDefaultFilters(), [
+            'preset' => PeriodPreset::last_8_weeks->value,
+            'exclude_events' => true,
+            'channel' => null,
+        ]);
     }
 
     public function filtersForm(Schema $schema): Schema

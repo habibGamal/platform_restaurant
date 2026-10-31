@@ -29,6 +29,7 @@ class AppPanelProvider extends PanelProvider
             ->login()
             ->brandName('منصة المطاعم')
             ->homeUrl(fn (): string => Overview::getUrl())
+            ->viteTheme('resources/css/filament/app/theme.css')
             ->navigationGroups([
                 NavigationGroup::make('التقارير'),
                 NavigationGroup::make('الإدارة'),

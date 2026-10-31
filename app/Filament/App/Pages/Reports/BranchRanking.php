@@ -24,17 +24,15 @@ class BranchRanking extends ReportPage
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTrophy;
 
-    public function mount(): void
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDefaultFilters(): array
     {
-        if (! isset($this->filters['preset']) && ! request()->has('preset')) {
-            $this->filters['preset'] = PeriodPreset::last_month->value;
-        }
-
-        if (! isset($this->filters['lfl']) && ! request()->has('lfl')) {
-            $this->filters['lfl'] = true;
-        }
-
-        parent::mount();
+        return array_merge(parent::getDefaultFilters(), [
+            'preset' => PeriodPreset::last_month->value,
+            'lfl' => true,
+        ]);
     }
 
     /**

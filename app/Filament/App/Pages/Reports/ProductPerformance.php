@@ -27,6 +27,16 @@ class ProductPerformance extends ReportPage
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCube;
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDefaultFilters(): array
+    {
+        return array_merge(parent::getDefaultFilters(), [
+            'preset' => PeriodPreset::last_30_days->value,
+        ]);
+    }
+
     public function filtersForm(Schema $schema): Schema
     {
         $schema = parent::filtersForm($schema);

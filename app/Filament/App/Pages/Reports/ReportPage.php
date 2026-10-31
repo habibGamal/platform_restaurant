@@ -14,19 +14,31 @@ use App\Models\BranchSet;
 use App\Models\Restaurant;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
+use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\EmbeddedSchema;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 
 abstract class ReportPage extends BaseDashboard
 {
     use HasFiltersForm;
 
     protected static string|\UnitEnum|null $navigationGroup = 'التقارير';
+
+    /**
+     * Draft filters edited in the inline filter form until Apply is clicked.
+     *
+     * @var array<string, mixed> | null
+     */
+    public ?array $draftFilters = [];
 
     public static function canAccess(): bool
     {
@@ -36,17 +48,45 @@ abstract class ReportPage extends BaseDashboard
         return $user !== null && $user->can('analytics.view');
     }
 
-    public function mount(): void
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDefaultFilters(): array
     {
-        $this->applyQueryStringFilters();
+        return [
+            'preset' => PeriodPreset::today->value,
+            'from' => null,
+            'to' => null,
+            'compare' => null,
+            'branches' => null,
+            'set' => null,
+            'restaurant' => null,
+            'lfl' => false,
+            'granularity' => null,
+        ];
     }
 
-    protected function applyQueryStringFilters(): void
+    public function mount(): void
     {
-        $query = request()->query();
-        $filterKeys = ['preset', 'from', 'to', 'compare', 'branches', 'set', 'restaurant', 'lfl', 'granularity', 'channel'];
+        $resolvedFilters = $this->getDefaultFilters();
 
-        $appliedAny = false;
+        if ($this->persistsFiltersInSession()) {
+            $sessionKey = $this->getFiltersSessionKey();
+            if (session()->has($sessionKey)) {
+                $sessionData = session()->get($sessionKey);
+                if (is_array($sessionData)) {
+                    $resolvedFilters = array_merge($resolvedFilters, $sessionData);
+                }
+            }
+        }
+
+        $query = request()->query();
+        if (isset($query['filters']) && is_array($query['filters'])) {
+            $query = array_merge($query, $query['filters']);
+        }
+
+        $filterKeys = ['preset', 'from', 'to', 'compare', 'branches', 'set', 'restaurant', 'lfl', 'granularity', 'channel', 'exclude_events'];
+
         foreach ($filterKeys as $key) {
             if (array_key_exists($key, $query)) {
                 $val = $query[$key];
@@ -57,32 +97,104 @@ abstract class ReportPage extends BaseDashboard
                             array_map('trim', explode(',', $val)),
                             fn (string $p): bool => $p !== '' && is_numeric($p)
                         );
-                        $this->filters[$key] = array_values(array_map('intval', $parts));
+                        $resolvedFilters[$key] = array_values(array_map('intval', $parts));
                     } elseif (is_array($val)) {
-                        $this->filters[$key] = array_values(array_map('intval', $val));
+                        $resolvedFilters[$key] = array_values(array_map('intval', $val));
                     }
-                } elseif ($key === 'lfl') {
-                    $this->filters[$key] = ($val === '1' || $val === 1 || $val === true || $val === 'true');
+                } elseif ($key === 'lfl' || $key === 'exclude_events') {
+                    $resolvedFilters[$key] = ($val === '1' || $val === 1 || $val === true || $val === 'true');
                 } elseif ($key === 'set' || $key === 'restaurant') {
-                    $this->filters[$key] = is_numeric($val) ? (int) $val : $val;
+                    $resolvedFilters[$key] = is_numeric($val) ? (int) $val : $val;
                 } else {
-                    $this->filters[$key] = $val;
+                    $resolvedFilters[$key] = $val;
                 }
-
-                $appliedAny = true;
             }
         }
 
-        if ($appliedAny) {
-            $this->getFiltersForm()->fill($this->filters);
+        $this->filters = $resolvedFilters;
+        $this->draftFilters = $resolvedFilters;
 
-            if ($this->persistsFiltersInSession()) {
-                session()->put(
-                    $this->getFiltersSessionKey(),
-                    $this->filters,
-                );
-            }
+        $this->getFiltersForm()->fill($this->draftFilters);
+
+        if ($this->persistsFiltersInSession()) {
+            session()->put(
+                $this->getFiltersSessionKey(),
+                $this->filters,
+            );
         }
+    }
+
+    public function applyFilters(): void
+    {
+        $committed = $this->getFiltersForm()->getState();
+        if (isset($committed['from']) && is_string($committed['from'])) {
+            $committed['from'] = substr($committed['from'], 0, 10);
+        }
+        if (isset($committed['to']) && is_string($committed['to'])) {
+            $committed['to'] = substr($committed['to'], 0, 10);
+        }
+
+        $this->draftFilters = $committed;
+        $this->filters = $committed;
+
+        if ($this->persistsFiltersInSession()) {
+            session()->put(
+                $this->getFiltersSessionKey(),
+                $this->filters,
+            );
+        }
+
+        $this->resetErrorBag();
+    }
+
+    public function resetFilters(): void
+    {
+        $defaults = $this->getDefaultFilters();
+
+        $this->draftFilters = $defaults;
+        $this->filters = $defaults;
+
+        $this->getFiltersForm()->fill($this->draftFilters);
+
+        if ($this->persistsFiltersInSession()) {
+            session()->put(
+                $this->getFiltersSessionKey(),
+                $this->filters,
+            );
+        }
+
+        $this->resetErrorBag();
+    }
+
+    public function applyAction(): Action
+    {
+        return Action::make('apply')
+            ->label('تطبيق الفلاتر')
+            ->icon(Heroicon::OutlinedFunnel)
+            ->color('primary')
+            ->action(fn () => $this->applyFilters());
+    }
+
+    public function resetAction(): Action
+    {
+        return Action::make('reset')
+            ->label('إعادة ضبط')
+            ->icon(Heroicon::OutlinedArrowPath)
+            ->color('gray')
+            ->action(fn () => $this->resetFilters());
+    }
+
+    public function getFiltersFormContentComponent(): Component
+    {
+        return Section::make('الفلاتر')
+            ->icon(Heroicon::OutlinedFunnel)
+            ->schema([
+                EmbeddedSchema::make('filtersForm'),
+            ])
+            ->footerActions([
+                $this->applyAction(),
+                $this->resetAction(),
+            ]);
     }
 
     public function reportFilters(): ReportFilters
@@ -104,6 +216,24 @@ abstract class ReportPage extends BaseDashboard
         );
     }
 
+    public function getFiltersForm(): Schema
+    {
+        if ((! $this->isCachingSchemas) && $this->hasCachedSchema('filtersForm')) {
+            return $this->getSchema('filtersForm');
+        }
+
+        $schema = $this->makeSchema()
+            ->columns([
+                'md' => 2,
+                'xl' => 3,
+                '2xl' => 4,
+            ])
+            ->extraAttributes(['wire:partial' => 'table-filters-form'])
+            ->statePath('draftFilters');
+
+        return $this->filtersForm($schema);
+    }
+
     public function filtersForm(Schema $schema): Schema
     {
         return $schema
@@ -111,17 +241,21 @@ abstract class ReportPage extends BaseDashboard
                 Select::make('preset')
                     ->label('الفترة')
                     ->options(collect(PeriodPreset::cases())->mapWithKeys(fn (PeriodPreset $case): array => [$case->value => $case->label()]))
-                    ->default(PeriodPreset::today->value)
+                    ->default(fn (): string => $this->getDefaultFilters()['preset'] ?? PeriodPreset::today->value)
                     ->live(),
 
                 DatePicker::make('from')
                     ->label('من تاريخ')
                     ->native(false)
+                    ->required(fn (Get $get): bool => $get('preset') === PeriodPreset::custom->value)
+                    ->beforeOrEqual('to')
                     ->visible(fn (Get $get): bool => $get('preset') === PeriodPreset::custom->value),
 
                 DatePicker::make('to')
                     ->label('إلى تاريخ')
                     ->native(false)
+                    ->required(fn (Get $get): bool => $get('preset') === PeriodPreset::custom->value)
+                    ->afterOrEqual('from')
                     ->visible(fn (Get $get): bool => $get('preset') === PeriodPreset::custom->value),
 
                 Select::make('compare')
@@ -193,7 +327,7 @@ abstract class ReportPage extends BaseDashboard
 
                 Toggle::make('lfl')
                     ->label('مقارنة نفس الفروع')
-                    ->default(false),
+                    ->default(fn (): bool => (bool) ($this->getDefaultFilters()['lfl'] ?? false)),
 
                 Select::make('granularity')
                     ->label('التجميع الزمني')

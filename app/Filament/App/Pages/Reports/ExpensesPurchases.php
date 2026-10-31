@@ -31,13 +31,14 @@ class ExpensesPurchases extends ReportPage
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptRefund;
 
-    public function mount(): void
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDefaultFilters(): array
     {
-        parent::mount();
-
-        if (! isset($this->filters['preset'])) {
-            $this->filters['preset'] = PeriodPreset::this_month->value;
-        }
+        return array_merge(parent::getDefaultFilters(), [
+            'preset' => PeriodPreset::this_month->value,
+        ]);
     }
 
     public function filtersForm(Schema $schema): Schema
