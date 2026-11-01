@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Assistant\AiAccess;
+use App\Domain\Assistant\AssistantService;
+use App\Domain\Assistant\Contracts\Assistant;
 use App\Domain\Assistant\ConversationGuard;
 use App\Models\User;
 use Illuminate\Support\Facades\Gate;
@@ -19,6 +21,7 @@ final class AssistantServiceProvider extends ServiceProvider
     {
         $this->app->singleton(AiAccess::class);
         $this->app->singleton(ConversationGuard::class);
+        $this->app->bind(Assistant::class, AssistantService::class);
     }
 
     /**
