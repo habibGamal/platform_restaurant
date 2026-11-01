@@ -12,6 +12,7 @@ use App\Models\AiConversationMeta;
 use App\Models\User;
 use Generator;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
@@ -127,7 +128,9 @@ final class AssistantService implements Assistant
         } catch (Throwable $e) {
             report($e);
 
-            yield AssistantEvent::error('provider_error', 'حدث خطأ في مزود خدمة الذكاء الاصطناعي. يرجى المحاولة لاحقاً.', $conversationId);
+            [$code, $message] = $this->describeProviderFailure($e);
+
+            yield AssistantEvent::error($code, $message, $conversationId);
         } finally {
             $this->touchConversation($conversationId);
         }
@@ -227,10 +230,12 @@ final class AssistantService implements Assistant
         } catch (Throwable $e) {
             report($e);
 
+            [$code, $message] = $this->describeProviderFailure($e);
+
             return new AssistantReply(
-                text: 'حدث خطأ في مزود خدمة الذكاء الاصطناعي. يرجى المحاولة لاحقاً.',
+                text: $message,
                 conversationId: $conversationId,
-                errorCode: 'provider_error',
+                errorCode: $code,
             );
         } finally {
             $this->touchConversation($conversationId);
@@ -252,6 +257,22 @@ final class AssistantService implements Assistant
         }
 
         Cache::put("ai:cancel:{$userId}:{$runId}", true, 600);
+    }
+
+    /**
+     * Turn a provider failure into an error code and an Arabic message the user can act on.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function describeProviderFailure(Throwable $e): array
+    {
+        $status = $e instanceof RequestException ? $e->response->status() : null;
+
+        return match (true) {
+            $status === 401, $status === 403 => ['provider_auth', 'مزود الذكاء الاصطناعي رفض مفتاح الاتصال. راجع المفتاح في إعدادات المساعد.'],
+            $status === 429 => ['provider_busy', 'مزود الذكاء الاصطناعي عليه ضغط دلوقتي. أعد إرسال السؤال بعد دقيقة.'],
+            default => ['provider_error', 'تعذر الوصول لمزود الذكاء الاصطناعي. أعد إرسال السؤال بعد قليل.'],
+        };
     }
 
     /**

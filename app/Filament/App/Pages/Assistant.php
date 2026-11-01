@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Filament\App\Pages;
 
+use App\Domain\Assistant\AssistantReadiness;
+use App\Domain\Assistant\AssistantReadinessResult;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant as AssistantContract;
 use App\Domain\Assistant\ConversationGuard;
+use App\Filament\App\Pages\Management\AiSettingsPage;
 use App\Models\AiConversationMeta;
 use App\Models\User;
 use BackedEnum;
@@ -14,6 +17,7 @@ use DateTimeInterface;
 use Filament\Pages\Page;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
@@ -57,12 +61,26 @@ class Assistant extends Page
 
     public ?string $errorMessage = null;
 
+    public ?string $errorCode = null;
+
     public ?string $streamedAnswer = null;
 
     /**
-     * @var list<array{id: string, role: string, content: string, created_at: string}>
+     * @var list<array{id: string, role: string, content: string, created_at: string, sources: list<string>}>
      */
     public array $messages = [];
+
+    /**
+     * Source labels already streamed into the rail for the current run.
+     *
+     * @var list<string>
+     */
+    protected array $streamedSources = [];
+
+    public function getHeading(): string|Htmlable|null
+    {
+        return null;
+    }
 
     public static function canAccess(): bool
     {
@@ -153,6 +171,7 @@ class Assistant extends Page
         $this->prompt = '';
         $this->toolStatus = null;
         $this->errorMessage = null;
+        $this->errorCode = null;
         $this->streamedAnswer = null;
         $this->currentRunId = null;
         $this->isStreaming = false;
@@ -167,6 +186,7 @@ class Assistant extends Page
         $this->prompt = '';
         $this->toolStatus = null;
         $this->errorMessage = null;
+        $this->errorCode = null;
         $this->streamedAnswer = null;
         $this->currentRunId = null;
         $this->isStreaming = false;
@@ -227,12 +247,15 @@ class Assistant extends Page
             'role' => 'user',
             'content' => $text,
             'created_at' => now()->format('H:i'),
+            'sources' => [],
         ];
 
         $this->currentRunId = $runId;
+        $this->streamedSources = [];
         $this->isStreaming = true;
         $this->toolStatus = null;
         $this->errorMessage = null;
+        $this->errorCode = null;
         $this->streamedAnswer = '';
 
         /** @var AssistantContract $assistant */
@@ -254,6 +277,12 @@ class Assistant extends Page
                 } elseif ($event->type === 'tool_call' && $event->toolName !== null) {
                     $this->toolStatus = $this->mapToolStatus($event->toolName);
                     $this->stream(to: 'status', content: e($this->toolStatus), replace: true);
+
+                    $source = $this->sourceLabel($event->toolName);
+                    if (! in_array($source, $this->streamedSources, true)) {
+                        $this->streamedSources[] = $source;
+                        $this->stream(to: 'sources', content: '<span class="aa-ticket">'.e($source).'</span>', replace: false);
+                    }
                 } elseif ($event->type === 'tool_result') {
                     $this->toolStatus = null;
                     $this->stream(to: 'status', content: '', replace: true);
@@ -266,6 +295,7 @@ class Assistant extends Page
                     $this->loadMessages();
                 } elseif ($event->type === 'error') {
                     $this->errorMessage = $event->text ?? 'حدث خطأ أثناء معالجة الطلب.';
+                    $this->errorCode = $event->errorCode;
                     if ($event->conversationId !== null) {
                         $this->selectedConversationId = $event->conversationId;
                     }
@@ -274,8 +304,10 @@ class Assistant extends Page
                     $this->loadMessages();
                 }
             }
-        } catch (Throwable) {
-            $this->errorMessage = 'عذراً، حدث خطأ غير متوقع أثناء معالجة الطلب.';
+        } catch (Throwable $e) {
+            report($e);
+            $this->errorMessage = 'تعذر إكمال الإجابة. أعد إرسال السؤال بعد قليل.';
+            $this->errorCode = 'provider_error';
             $this->toolStatus = null;
             $this->isStreaming = false;
         } finally {
@@ -339,6 +371,7 @@ class Assistant extends Page
                     'role' => (string) $msg->getAttribute('role'),
                     'content' => (string) ($msg->getAttribute('content') ?? ''),
                     'created_at' => $formattedTime,
+                    'sources' => $this->sourcesFromSteps($msg->getAttribute('steps')),
                 ];
             })->all());
         }
@@ -376,6 +409,88 @@ class Assistant extends Page
     }
 
     /**
+     * Short noun for a data source, shown as a ticket under the answer that used it.
+     */
+    protected function sourceLabel(string $toolName): string
+    {
+        return match ($toolName) {
+            'get_workspace_context' => 'نطاق حسابك',
+            'resolve_period' => 'الفترة',
+            'find_branches' => 'الفروع',
+            'search_products' => 'الأصناف',
+            'get_kpis' => 'المؤشرات',
+            'get_kpi_series' => 'الاتجاه الزمني',
+            'query_metrics' => 'تفاصيل المبيعات',
+            'targets_status' => 'المستهدفات',
+            'data_health' => 'حالة البيانات',
+            default => 'بيانات التقارير',
+        };
+    }
+
+    /**
+     * Tool names recorded in a stored assistant message's steps, as source labels.
+     *
+     * @return list<string>
+     */
+    protected function sourcesFromSteps(mixed $steps): array
+    {
+        if (is_string($steps)) {
+            $steps = json_decode($steps, true);
+        }
+
+        if (! is_array($steps)) {
+            return [];
+        }
+
+        $labels = [];
+        foreach ($steps as $step) {
+            $calls = is_array($step) ? ($step['tool_calls'] ?? []) : [];
+            foreach (is_array($calls) ? $calls : [] as $call) {
+                $name = is_array($call) ? ($call['name'] ?? null) : null;
+                if (is_string($name) && $name !== '') {
+                    $labels[] = $this->sourceLabel($name);
+                }
+            }
+        }
+
+        return array_values(array_unique($labels));
+    }
+
+    /**
+     * Whether the organization has a usable provider; null when the readiness check is unavailable.
+     */
+    public function getReadiness(): ?AssistantReadinessResult
+    {
+        $organization = auth()->user()?->organization;
+
+        if ($organization === null || ! class_exists(AssistantReadiness::class)) {
+            return null;
+        }
+
+        return app(AssistantReadiness::class)->check($organization);
+    }
+
+    public function canManageAssistant(): bool
+    {
+        return (bool) auth()->user()?->can('ai.manage');
+    }
+
+    public function getSettingsUrl(): ?string
+    {
+        return class_exists(AiSettingsPage::class) && $this->canManageAssistant()
+            ? AiSettingsPage::getUrl()
+            : null;
+    }
+
+    public function getGreeting(): string
+    {
+        $name = Str::of((string) auth()->user()?->name)->trim()->before(' ')->toString();
+        $greeting = now()->hour < 12 ? 'صباح الخير' : 'مساء الخير';
+
+        return $name !== '' ? "{$greeting}، {$name}" : $greeting;
+    }
+
+    /**
      * @return list<string>
      */
     public function getStarterPrompts(): array
@@ -406,9 +521,14 @@ class Assistant extends Page
             return '';
         }
 
-        return Str::markdown($content, [
+        $html = Str::markdown($content, [
             'html_input' => 'escape',
             'allow_unsafe_links' => false,
         ]);
+
+        // Markdown output is already escaped; these only add classes to tags it generated.
+        $html = str_replace(['<table>', '</table>'], ['<div class="aa-table"><table>', '</table></div>'], $html);
+
+        return (string) preg_replace('/<(p|li)>(\s*(?:<strong>)?\s*اقتراح)/u', '<$1 class="aa-suggest">$2', $html);
     }
 }

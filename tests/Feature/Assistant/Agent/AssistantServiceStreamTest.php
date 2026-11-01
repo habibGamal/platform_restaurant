@@ -14,7 +14,9 @@ use App\Models\AiConversationMeta;
 use App\Models\Organization;
 use App\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Ai\Exceptions\FailoverableException;
@@ -132,7 +134,25 @@ final class AssistantServiceStreamTest extends TestCase
         $this->assertInstanceOf(AssistantEvent::class, $lastEvent);
         $this->assertSame('error', $lastEvent->type);
         $this->assertSame('provider_error', $lastEvent->errorCode);
-        $this->assertStringContainsString('مزود خدمة', (string) $lastEvent->text);
+        $this->assertStringContainsString('مزود الذكاء الاصطناعي', (string) $lastEvent->text);
+    }
+
+    public function test_stream_reports_a_rejected_provider_key_as_provider_auth(): void
+    {
+        $user = $this->createEligibleUser();
+
+        RestaurantAnalyst::fake([
+            fn () => throw new RequestException(
+                new \Illuminate\Http\Client\Response(new Response(401, [], '{"error":"invalid_api_key"}'))
+            ),
+        ]);
+
+        $events = iterator_to_array($this->service->stream($user, Channel::Chat, null, 'سؤال', (string) Str::uuid()));
+
+        $lastEvent = end($events);
+        $this->assertInstanceOf(AssistantEvent::class, $lastEvent);
+        $this->assertSame('provider_auth', $lastEvent->errorCode);
+        $this->assertStringContainsString('رفض مفتاح الاتصال', (string) $lastEvent->text);
     }
 
     public function test_last_activity_at_is_updated_after_each_run(): void

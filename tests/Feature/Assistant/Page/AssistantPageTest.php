@@ -525,4 +525,51 @@ class AssistantPageTest extends TestCase
             ->assertSet('selectedConversationId', null)
             ->assertSet('messages', []);
     }
+
+    public function test_stored_answer_shows_the_data_sources_its_tools_used(): void
+    {
+        $this->actingAs($this->allowedOwner);
+
+        AiConversationMeta::create([
+            'conversation_id' => 'conv-sources-1',
+            'organization_id' => $this->eligibleOrg->id,
+            'user_id' => $this->allowedOwner->id,
+            'channel' => Channel::Chat,
+            'title' => 'مصادر الإجابة',
+            'pinned' => false,
+            'last_activity_at' => now(),
+        ]);
+
+        ConversationMessage::create([
+            'id' => (string) Str::uuid(),
+            'conversation_id' => 'conv-sources-1',
+            'participant_type' => User::class,
+            'participant_id' => $this->allowedOwner->id,
+            'agent' => 'RestaurantAnalyst',
+            'role' => 'assistant',
+            'content' => 'المبيعات ثابتة',
+            'attachments' => '[]',
+            'steps' => json_encode([
+                ['tool_calls' => [['id' => 't1', 'name' => 'resolve_period', 'arguments' => []], ['id' => 't2', 'name' => 'get_kpis', 'arguments' => []]]],
+                ['tool_calls' => [['id' => 't3', 'name' => 'get_kpis', 'arguments' => []]]],
+            ]),
+            'usage' => '[]',
+            'meta' => '[]',
+            'status' => 'completed',
+        ]);
+
+        $component = Livewire::test(AssistantPage::class)->call('selectConversation', 'conv-sources-1');
+
+        $this->assertSame(['الفترة', 'المؤشرات'], $component->get('messages')[0]['sources']);
+        $component->assertSeeHtml('<span class="aa-ticket">الفترة</span>')
+            ->assertSeeHtml('<span class="aa-ticket">المؤشرات</span>');
+    }
+
+    public function test_markdown_marks_suggestions_and_wraps_tables(): void
+    {
+        $html = (new AssistantPage)->renderMarkdown("عنوان\n\n**اقتراح:** راجع الورديات\n\n| الفرع | المبيعات |\n|---|---|\n| أ | 10 |");
+
+        $this->assertStringContainsString('<p class="aa-suggest"><strong>اقتراح:</strong>', $html);
+        $this->assertStringContainsString('<div class="aa-table"><table>', $html);
+    }
 }
