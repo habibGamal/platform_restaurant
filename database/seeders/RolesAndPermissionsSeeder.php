@@ -19,6 +19,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'analytics.view_group',
             'analytics.view_other_branch_names',
             'ai.view',
+            'ai.manage',
             'targets.manage',
             'users.manage',
             'alerts.manage',
