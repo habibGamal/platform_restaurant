@@ -1,0 +1,53 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Assistant;
+
+/**
+ * One event in a streamed assistant answer, independent of the SDK's own event classes.
+ *
+ * type:
+ *  - text_delta  : $text holds the next chunk of the answer
+ *  - tool_call   : $toolName is about to run (UI shows a status chip)
+ *  - tool_result : $toolName finished
+ *  - done        : answer complete; $conversationId and $messageId are set
+ *  - error       : $errorCode is set ('forbidden', 'budget_exceeded', 'rate_limited',
+ *                  'cancelled', 'provider_error'), $text holds an Arabic message for the user
+ */
+final readonly class AssistantEvent
+{
+    public function __construct(
+        public string $type,
+        public ?string $text = null,
+        public ?string $toolName = null,
+        public ?string $conversationId = null,
+        public ?string $messageId = null,
+        public ?string $errorCode = null,
+    ) {}
+
+    public static function textDelta(string $text): self
+    {
+        return new self('text_delta', text: $text);
+    }
+
+    public static function toolCall(string $toolName): self
+    {
+        return new self('tool_call', toolName: $toolName);
+    }
+
+    public static function toolResult(string $toolName): self
+    {
+        return new self('tool_result', toolName: $toolName);
+    }
+
+    public static function done(string $conversationId, ?string $messageId = null): self
+    {
+        return new self('done', conversationId: $conversationId, messageId: $messageId);
+    }
+
+    public static function error(string $errorCode, string $messageAr, ?string $conversationId = null): self
+    {
+        return new self('error', text: $messageAr, conversationId: $conversationId, errorCode: $errorCode);
+    }
+}
