@@ -36,7 +36,7 @@ use Throwable;
  * Its `rules` come from a closed set, each graded against the run's transcript:
  *  - no_delegation: no specialist agent was called
  *  - delegates:<agent>: the named specialist agent was called
- *  - focus_excludes_roles:<role>,...: no item named under the «ركز على» section has one of those roles
+ *  - focus_excludes_roles:<role>,...: the answer has a «ركز على» section and no item named in it has one of those roles or no trusted role
  *  - combos_one_main_above_floor: every combo_builder combo has exactly one main and margin_pct >= margin_floor_pct;
  *    a run without combo_builder combos must not propose combos naming menu items
  *  - grounded: the NumericGroundingChecker finds every number of the answer in the tool results
@@ -52,6 +52,9 @@ class EvalRunner
 
     /** Section headings of a marketing answer. */
     private const SECTIONS = [self::FOCUS_SECTION, 'متلمسش', self::COMBO_SECTION, 'أفكار'];
+
+    /** Arabic harakat (incl. shadda) and tatweel, ignored when matching headings. */
+    private const DIACRITICS = '/[\x{064B}-\x{0652}\x{0640}]/u';
 
     /** Owner-set roles for the menu fixture, so evals never call the role classifier. */
     private const MENU_ROLES = [
@@ -342,7 +345,7 @@ class EvalRunner
      * @param  list<array{tool: string, result: mixed}>  $toolResults
      * @return array<string, string> failed rule => why it failed
      */
-    protected function gradeRules(
+    public function gradeRules(
         array $rules,
         array $calledTools,
         array $delegatedAgents,
@@ -397,14 +400,17 @@ class EvalRunner
 
         $section = $this->section($replyText, self::FOCUS_SECTION);
         if ($section === null) {
-            return null;
+            return 'No «'.self::FOCUS_SECTION.'» section.';
         }
 
+        // Focus lists exclude the listed roles and every item without a trusted role.
         $roleMap = app(ItemRoles::class)->mapFor($organizationId);
         $offenders = [];
         foreach ($this->mentionedItems($section, $organizationId) as $itemKey => $itemName) {
             $role = $roleMap->roleOf($itemKey);
-            if ($role !== null && in_array($role->value, $excluded, true)) {
+            if ($role === null) {
+                $offenders[] = "{$itemName} (no trusted role)";
+            } elseif (in_array($role->value, $excluded, true)) {
                 $offenders[] = "{$itemName} ({$role->value})";
             }
         }
@@ -464,24 +470,50 @@ class EvalRunner
         return $problems === [] ? null : ucfirst(implode('; ', $problems)).'.';
     }
 
-    /** The answer text under a section heading, up to the next known heading; null when the heading is absent. */
+    /**
+     * The answer text under a section heading, up to the next heading line or the end; null when the heading is absent.
+     * A heading is a line that starts with the heading word, optionally decorated («», markdown, bullets, colon);
+     * Arabic diacritics and tatweel are ignored, so «تركز على» in prose or «ركّز على» are handled.
+     */
     private function section(string $text, string $heading): ?string
     {
-        $start = mb_strpos($text, $heading);
-        if ($start === false) {
-            return null;
-        }
+        $lines = preg_split('/\R/u', (string) preg_replace(self::DIACRITICS, '', $text)) ?: [];
+        $collected = null;
 
-        $from = $start + mb_strlen($heading);
-        $end = mb_strlen($text);
-        foreach (self::SECTIONS as $other) {
-            $position = $other === $heading ? false : mb_strpos($text, $other, $from);
-            if ($position !== false && $position < $end) {
-                $end = $position;
+        foreach ($lines as $line) {
+            $found = $this->headingOf($line);
+            if ($found === null) {
+                if ($collected !== null) {
+                    $collected[] = $line;
+                }
+
+                continue;
+            }
+
+            if ($collected !== null) {
+                break;
+            }
+            if ($found[0] === $heading) {
+                $collected = [$found[1]];
             }
         }
 
-        return mb_substr($text, $from, $end - $from);
+        return $collected === null ? null : implode("\n", $collected);
+    }
+
+    /**
+     * The section heading a line opens and the rest of that line, or null when the line is not a heading.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    private function headingOf(string $line): ?array
+    {
+        $headings = implode('|', array_map(fn (string $heading): string => preg_quote($heading, '/'), self::SECTIONS));
+        if (preg_match('/^[\s#*\-•«]*('.$headings.')(?!\p{L})[\s:»*]*(.*)$/u', $line, $match) !== 1) {
+            return null;
+        }
+
+        return [$match[1], $match[2]];
     }
 
     /**

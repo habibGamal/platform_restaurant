@@ -434,16 +434,58 @@ class EvalRunnerTest extends TestCase
         $this->assertSame('Focus section names: Water (drink).', $report->cases[1]->ruleFailures[$rule]);
     }
 
+    public function test_focus_section_is_found_only_on_a_heading_line_and_must_exist(): void
+    {
+        $this->seedFixtureRoles();
+        // Cheese Burger is on the menu but has no trusted role.
+        ItemRoleAssignment::query()
+            ->where('organization_id', $this->fixture->organization->id)
+            ->where('item_key', 'BURGER-3')
+            ->delete();
+
+        $prose = "عشان تعرف تركز على إيه، جهزتلك شوية أفكار:\n\n**ركز على:**\n";
+        $transcripts = [
+            'نثر فيه مشروب' => $prose."- Water\n- Double Burger\n\n**متلمسش:**\n- Single Burger",
+            'نثر سليم' => $prose."- Double Burger\n- Fries\n\n**متلمسش:**\n- Single Burger مع Water",
+            'عنوان ماركداون' => "### ركز على\n- Double Burger\n### متلمسش\n- Water\n### أفكار\n- اقتراح: Cola",
+            'شدة' => "ركّز على:\n- Cola\n\nمتلمسش:\n- Single Burger",
+            'بدون عنوان' => 'أنصحك تزود الإعلان على Double Burger.',
+            'صنف غير موثوق' => "«ركز على»\n- Cheese Burger\n«متلمسش»\n- Single Burger",
+        ];
+        $this->app->instance(Assistant::class, $this->scriptedAssistant(
+            array_map(fn (string $answer): array => [[], $answer], $transcripts),
+        ));
+
+        $rule = 'focus_excludes_roles:drink,addon,adjustment,raw';
+        $report = (new EvalRunner($this->checker, $this->fixture))->run(customCases: array_map(
+            fn (string $question): array => $this->ruleCase($question, $question, [$rule]),
+            array_keys($transcripts),
+        ));
+
+        $failures = [];
+        foreach ($report->cases as $case) {
+            $failures[$case->caseId] = $case->ruleFailures[$rule] ?? null;
+        }
+        $this->assertSame([
+            'نثر فيه مشروب' => 'Focus section names: Water (drink).',
+            'نثر سليم' => null,
+            'عنوان ماركداون' => null,
+            'شدة' => 'Focus section names: Cola (drink).',
+            'بدون عنوان' => 'No «ركز على» section.',
+            'صنف غير موثوق' => 'Focus section names: Cheese Burger (no trusted role).',
+        ], $failures);
+    }
+
     public function test_combos_rule_rechecks_every_combo_returned_by_combo_builder(): void
     {
         $good = $this->comboResult([
-            ['items' => [['key' => 'ZORBA-PLATE', 'name' => 'Zorba Plate', 'role' => 'main', 'list_price' => 200.0], ['key' => 'LUMO-RICE', 'name' => 'Lumo Rice', 'role' => 'side', 'list_price' => 25.0]], 'suggested_price' => 210.0, 'cost' => 68.0, 'margin_pct' => 0.68, 'discount_pct' => 0.07],
+            ['items' => [['key' => 'ZORBA-PLATE', 'name' => 'Zorba Plate', 'role' => 'main', 'list_price' => 200.0], ['key' => 'LUMO-RICE', 'name' => 'Lumo Rice', 'role' => 'side', 'list_price' => 25.0]], 'suggested_price' => 210.0, 'cost' => 68.0],
         ], 0.55);
         $twoMains = $this->comboResult([
-            ['items' => [['key' => 'ZORBA-PLATE', 'name' => 'Zorba Plate', 'role' => 'main', 'list_price' => 200.0], ['key' => 'KELTO-WRAP', 'name' => 'Kelto Wrap', 'role' => 'main', 'list_price' => 100.0]], 'suggested_price' => 280.0, 'cost' => 88.0, 'margin_pct' => 0.69, 'discount_pct' => 0.07],
+            ['items' => [['key' => 'ZORBA-PLATE', 'name' => 'Zorba Plate', 'role' => 'main', 'list_price' => 200.0], ['key' => 'KELTO-WRAP', 'name' => 'Kelto Wrap', 'role' => 'main', 'list_price' => 100.0]], 'suggested_price' => 280.0, 'cost' => 88.0],
         ], 0.55);
         $belowFloor = $this->comboResult([
-            ['items' => [['key' => 'BRIMO-BOX', 'name' => 'Brimo Box', 'role' => 'main', 'list_price' => 60.0], ['key' => 'PEXA-SALAD', 'name' => 'Pexa Salad', 'role' => 'side', 'list_price' => 30.0]], 'suggested_price' => 85.0, 'cost' => 58.0, 'margin_pct' => 0.32, 'discount_pct' => 0.06],
+            ['items' => [['key' => 'BRIMO-BOX', 'name' => 'Brimo Box', 'role' => 'main', 'list_price' => 60.0], ['key' => 'PEXA-SALAD', 'name' => 'Pexa Salad', 'role' => 'side', 'list_price' => 30.0]], 'suggested_price' => 85.0, 'cost' => 58.0],
         ], 0.55);
         $answer = "«كومبو مقترح»\n- العرض اللي رجعه المتخصص";
         $this->app->instance(Assistant::class, $this->scriptedAssistant([
@@ -501,7 +543,7 @@ class EvalRunnerTest extends TestCase
         ));
 
         $report = (new EvalRunner($this->checker, null, $menu))->run(customCases: [
-            $this->ruleCase('menu_case', 'سؤال قائمة', ['focus_excludes_roles:drink,addon,adjustment,raw'], 'menu'),
+            $this->ruleCase('menu_case', 'سؤال قائمة', ['no_delegation'], 'menu'),
         ]);
 
         $this->assertTrue($report->cases[0]->passed);
@@ -613,15 +655,37 @@ class EvalRunnerTest extends TestCase
     }
 
     /**
-     * A combo_builder tool payload in the shape the real tool returns (metrics = the ComboBuilder result).
+     * A combo_builder tool payload in the exact envelope ComboBuilderTool returns (metrics = the ComboBuilder
+     * result, combos priced like ComboBuilder::price); ComboBuilderTest grades a real payload the same way.
      *
-     * @param  list<array<string, mixed>>  $combos
+     * @param  list<array{items: list<array{key: string, name: string, role: string, list_price: float}>, suggested_price: float, cost: float}>  $combos
      */
     private function comboResult(array $combos, float $floor): string
     {
+        $priced = array_map(function (array $combo): array {
+            $listPrice = array_sum(array_column($combo['items'], 'list_price'));
+
+            return [
+                'items' => $combo['items'],
+                'list_price' => $listPrice,
+                'suggested_price' => $combo['suggested_price'],
+                'cost' => $combo['cost'],
+                'margin_pct' => ($combo['suggested_price'] - $combo['cost']) / $combo['suggested_price'],
+                'discount_pct' => 1 - $combo['suggested_price'] / $listPrice,
+                'why' => 'الأصناف دي اتطلبت مع بعض.',
+            ];
+        }, $combos);
+
         return json_encode([
-            'summary' => 'جهزت عروض بهامش ربح آمن.',
-            'metrics' => ['status' => 'ok', 'margin_floor_pct' => $floor, 'combos' => $combos],
+            'summary' => 'جهزت '.count($priced).' عروض بهامش ربح آمن.',
+            'period' => ['from' => '2026-10-03', 'to' => '2026-10-16', 'preset' => 'custom'],
+            'comparison' => null,
+            'branches' => [1 => 'Branch A', 2 => 'Branch B'],
+            'currency' => 'EGP',
+            'metrics' => ['status' => 'ok', 'margin_floor_pct' => $floor, 'combos' => $priced],
+            'completeness' => ['summary' => ['complete_branches' => 2, 'total_branches' => 2], 'warnings' => []],
+            'definitions' => [],
+            'notes' => [],
         ], JSON_THROW_ON_ERROR);
     }
 

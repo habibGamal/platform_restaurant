@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Menu;
 
 use App\Ai\Tools\Menu\ComboBuilderTool;
+use App\Domain\Assistant\Evals\EvalRunner;
+use App\Domain\Assistant\GroundingResult;
 use App\Domain\Menu\ComboBuilder;
 use App\Domain\Menu\ItemRole;
 use App\Domain\Menu\ItemRoles;
@@ -135,5 +137,34 @@ class ComboBuilderTest extends TestCase
         $short = app(ComboBuilder::class)->proposeFor($this->metricsQuery(from: '2026-10-16'), $this->fixture->organization);
         $this->assertSame('insufficient_data', $short['status']);
         $this->assertNotEmpty($short['reason'] ?? null);
+    }
+
+    public function test_eval_combo_rule_grades_the_real_tool_payload(): void
+    {
+        $payload = (new ComboBuilderTool($this->fixture->owner))->handle(new Request(['preset' => 'custom', 'from' => MenuFixture::FROM, 'to' => MenuFixture::TO]));
+        $decoded = json_decode($payload, true);
+        $this->assertNotEmpty($decoded['metrics']['combos']);
+
+        $grade = fn (string $result): array => app(EvalRunner::class)->gradeRules(
+            rules: ['combos_one_main_above_floor'],
+            calledTools: ['combo_builder'],
+            delegatedAgents: [],
+            toolResults: [['tool' => 'combo_builder', 'result' => $result]],
+            replyText: '',
+            grounding: new GroundingResult(grounded: true),
+            organizationId: $this->fixture->organization->id,
+        );
+        $this->assertSame([], $grade($payload));
+
+        $twoMains = $decoded;
+        $twoMains['metrics']['combos'][0]['items'][1]['role'] = 'main';
+        $this->assertSame(
+            ['combos_one_main_above_floor' => 'Combo 1 has 2 main items.'],
+            $grade(json_encode($twoMains, JSON_THROW_ON_ERROR)),
+        );
+
+        $raisedFloor = $decoded;
+        $raisedFloor['metrics']['margin_floor_pct'] = 0.99;
+        $this->assertArrayHasKey('combos_one_main_above_floor', $grade(json_encode($raisedFloor, JSON_THROW_ON_ERROR)));
     }
 }
