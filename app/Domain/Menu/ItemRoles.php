@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Menu;
 
+use App\Jobs\ClassifyItemRoles;
 use App\Models\ItemRoleAssignment;
 use App\Models\Organization;
 use Throwable;
@@ -57,8 +58,9 @@ final class ItemRoles
 
     /**
      * The trusted role map for the organization, after making one attempt to classify any of the
-     * given items that have no trusted role yet. A classification failure is reported, never thrown:
-     * the returned map then simply still lacks those items.
+     * given items that have no trusted role yet. The attempt makes at most one model call; items it
+     * could not reach stay untrusted here and are left to a queued ClassifyItemRoles run. A
+     * classification failure is reported, never thrown: the returned map then simply lacks those items.
      *
      * @param  list<string>  $itemKeys
      */
@@ -72,7 +74,11 @@ final class ItemRoles
         }
 
         try {
-            app(RoleClassifier::class)->classify($organization, $untrusted);
+            $result = app(RoleClassifier::class)->classify($organization, $untrusted, maxModelCalls: 1);
+
+            if ($result['deferred'] > 0) {
+                ClassifyItemRoles::dispatch($organization->id);
+            }
         } catch (Throwable $e) {
             report($e);
         }

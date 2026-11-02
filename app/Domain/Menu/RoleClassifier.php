@@ -33,6 +33,9 @@ final class RoleClassifier
     /** Items listed per category when asking the model to judge a category. */
     private const CATEGORY_SAMPLE = 12;
 
+    /** Model calls the current classify() run may still make; null = no limit. */
+    private ?int $modelCallsLeft = null;
+
     public function __construct(
         private readonly RoleSignals $signals,
         private readonly ItemRoles $itemRoles,
@@ -43,13 +46,33 @@ final class RoleClassifier
 
     /**
      * @param  list<string>|null  $onlyItemKeys  restrict the work to these items (null = every item sold in the window)
-     * @return array{classified: int, skipped: int} skipped counts items left untouched: owner-set, already
-     *                                              trusted, or (when AI is off or the budget is spent) not attempted
+     * @param  int|null  $maxModelCalls  stop asking the model after this many calls (null = no limit)
+     * @return array{classified: int, skipped: int, deferred: int} skipped counts items left untouched: owner-set,
+     *                                                             already trusted or recently judged, or (when AI is
+     *                                                             off or the budget is spent) not attempted; deferred
+     *                                                             counts items left for later by $maxModelCalls
      */
-    public function classify(Organization $organization, ?array $onlyItemKeys = null): array
+    public function classify(Organization $organization, ?array $onlyItemKeys = null, ?int $maxModelCalls = null): array
     {
+        $this->modelCallsLeft = $maxModelCalls;
+
         if (! $this->access->allowsOrganization($organization)) {
-            return ['classified' => 0, 'skipped' => count($onlyItemKeys ?? [])];
+            return ['classified' => 0, 'skipped' => count($onlyItemKeys ?? []), 'deferred' => 0];
+        }
+
+        $ownerKeys = array_flip($this->ownerKeys($organization->id));
+        $recentlyJudged = array_flip($this->recentlyJudgedKeys($organization->id));
+
+        // Settled items are dropped before the (org-wide, 90-day) signals are computed, which they may make needless.
+        $settled = 0;
+        if ($onlyItemKeys !== null) {
+            $open = array_values(array_filter($onlyItemKeys, fn (string $key): bool => ! isset($ownerKeys[$key]) && ! isset($recentlyJudged[$key])));
+            $settled = count($onlyItemKeys) - count($open);
+            $onlyItemKeys = $open;
+
+            if ($onlyItemKeys === []) {
+                return ['classified' => 0, 'skipped' => $settled, 'deferred' => 0];
+            }
         }
 
         // With the budget spent only the data-only roles apply: no model call is made.
@@ -57,18 +80,17 @@ final class RoleClassifier
 
         $to = $this->latestBusinessDate($organization->id);
         if ($to === null) {
-            return ['classified' => 0, 'skipped' => 0];
+            return ['classified' => 0, 'skipped' => $settled, 'deferred' => 0];
         }
 
         $all = $this->signals->compute($organization->id, $to->subDays(self::WINDOW_DAYS - 1), $to);
         $scope = $onlyItemKeys === null ? $all : array_intersect_key($all, array_flip($onlyItemKeys));
 
-        $ownerKeys = array_flip($this->ownerKeys($organization->id));
         $trusted = $this->itemRoles->mapFor($organization->id);
-        $recentlyJudged = array_flip($this->recentlyJudgedKeys($organization->id));
 
         $classified = 0;
-        $skipped = 0;
+        $skipped = $settled;
+        $deferred = 0;
         $hard = [];
         $pending = [];
 
@@ -105,7 +127,7 @@ final class RoleClassifier
         $classified += $this->persist($organization->id, $hard);
 
         if ($pending === [] || $budgetSpent) {
-            return ['classified' => $classified, 'skipped' => $skipped + count($pending)];
+            return ['classified' => $classified, 'skipped' => $skipped + count($pending), 'deferred' => 0];
         }
 
         $categoryRoles = $this->classifyCategories($organization, $pending, $all);
@@ -128,6 +150,12 @@ final class RoleClassifier
         $classified += $this->persist($organization->id, $inherited);
 
         foreach (array_chunk($remaining, self::BATCH_SIZE, true) as $batch) {
+            if ($this->modelCallsLeft === 0) {
+                $deferred += count($batch);
+
+                continue;
+            }
+
             $answers = $this->ask($organization, 'items', array_map(
                 fn (ItemSignals $s): array => [
                     'key' => $s->itemKey,
@@ -153,7 +181,7 @@ final class RoleClassifier
             $classified += $this->persist($organization->id, $rows);
         }
 
-        return ['classified' => $classified, 'skipped' => $skipped];
+        return ['classified' => $classified, 'skipped' => $skipped, 'deferred' => $deferred];
     }
 
     /**
@@ -202,6 +230,10 @@ final class RoleClassifier
             }
 
             foreach (array_chunk($entries, self::BATCH_SIZE) as $chunk) {
+                if ($this->modelCallsLeft === 0) {
+                    break;
+                }
+
                 $answers = $this->ask($organization, 'categories', $chunk, allowMixed: true);
                 if ($answers === null) {
                     break;
@@ -254,6 +286,10 @@ final class RoleClassifier
     {
         if ($this->budget->projectedExceeds($organization, 0.0)) {
             return null;
+        }
+
+        if ($this->modelCallsLeft !== null) {
+            $this->modelCallsLeft--;
         }
 
         $startedAt = hrtime(true);

@@ -16,7 +16,9 @@ use App\Models\CategoryRoleAssignment;
 use App\Models\ItemRoleAssignment;
 use App\Models\Organization;
 use Carbon\Carbon;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schedule;
 use Laravel\Ai\Responses\Data\Meta;
@@ -179,7 +181,7 @@ class RoleClassifierTest extends TestCase
 
         $result = $this->classifier()->classify($f->organization->refresh(), ['ZORBA-PLATE', 'KELTO-WRAP']);
 
-        $this->assertSame(['classified' => 0, 'skipped' => 2], $result);
+        $this->assertSame(['classified' => 0, 'skipped' => 2, 'deferred' => 0], $result);
         ItemRoleClassifier::assertNeverPrompted();
         $this->assertSame(0, ItemRoleAssignment::query()->count());
     }
@@ -378,6 +380,74 @@ class RoleClassifierTest extends TestCase
         app(ItemRoles::class)->ensureClassified($f->organization, ['ZORBA-PLATE', 'PEXA-SALAD']);
         ItemRoleClassifier::assertPromptedTimes(1);
         $this->assertSame($before, ItemRoleAssignment::query()->count());
+    }
+
+    public function test_on_demand_classification_makes_one_model_call_and_queues_the_rest(): void
+    {
+        Queue::fake();
+        $f = MenuFixture::create();
+        // The category is not confident enough to inherit, so the items would need a second call.
+        $this->fakeModel(
+            ['ZORBA-PLATE' => ['main', 0.90], 'KELTO-WRAP' => ['main', 0.90]],
+            ['mains' => ['main', 0.60], 'sides' => ['side', 0.90], 'drinks' => ['drink', 0.90], 'extras' => ['mixed', 0.60]],
+        );
+
+        $map = app(ItemRoles::class)->ensureClassified($f->organization, ['ZORBA-PLATE', 'KELTO-WRAP']);
+
+        ItemRoleClassifier::assertPromptedTimes(1);
+        ItemRoleClassifier::assertPrompted(fn ($p) => str_contains($p->prompt, 'categories'));
+        $this->assertSame(['ZORBA-PLATE', 'KELTO-WRAP'], $map->untrustedAmong(['ZORBA-PLATE', 'KELTO-WRAP']));
+        Queue::assertPushed(ClassifyItemRoles::class, fn (ClassifyItemRoles $job): bool => $job->organizationId === $f->organization->id);
+    }
+
+    public function test_on_demand_classification_with_known_categories_makes_one_item_call(): void
+    {
+        Queue::fake();
+        $f = MenuFixture::create();
+        CategoryRoleAssignment::query()->create([
+            'organization_id' => $f->organization->id,
+            'category_key' => 'mains',
+            'role' => 'main',
+            'confidence' => 0.60,
+            'source' => 'auto',
+        ]);
+        $this->fakeModel(['ZORBA-PLATE' => ['main', 0.90], 'KELTO-WRAP' => ['combo', 0.85]]);
+
+        $map = app(ItemRoles::class)->ensureClassified($f->organization, ['ZORBA-PLATE', 'KELTO-WRAP']);
+
+        ItemRoleClassifier::assertPromptedTimes(1);
+        ItemRoleClassifier::assertNotPrompted(fn ($p) => str_contains($p->prompt, 'categories'));
+        $this->assertSame(ItemRole::Main, $map->roleOf('ZORBA-PLATE'));
+        $this->assertSame(ItemRole::Combo, $map->roleOf('KELTO-WRAP'));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_on_demand_classification_of_settled_items_computes_no_signals(): void
+    {
+        $f = MenuFixture::create();
+        $orgId = $f->organization->id;
+        app(ItemRoles::class)->setOwnerRole($orgId, 'ZORBA-PLATE', ItemRole::Main);
+        ItemRoleAssignment::query()->create([
+            'organization_id' => $orgId,
+            'item_key' => 'KELTO-WRAP',
+            'role' => 'side',
+            'source' => 'auto',
+            'confidence' => 0.40,
+            'classified_at' => now()->subDay(),
+        ]);
+        $this->fakeModel();
+        $signalQueries = 0;
+        DB::listen(function (QueryExecuted $query) use (&$signalQueries): void {
+            if (str_contains($query->sql, 'wh_order_items')) {
+                $signalQueries++;
+            }
+        });
+
+        $result = $this->classifier()->classify($f->organization, ['ZORBA-PLATE', 'KELTO-WRAP'], maxModelCalls: 1);
+
+        $this->assertSame(['classified' => 0, 'skipped' => 2, 'deferred' => 0], $result);
+        $this->assertSame(0, $signalQueries);
+        ItemRoleClassifier::assertNeverPrompted();
     }
 
     public function test_job_is_unique_per_organization_and_delegates_to_the_classifier(): void
