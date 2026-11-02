@@ -23,6 +23,9 @@ class RunAssistantQuestion implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
+    /** Connection and queue name of the assistant worker (config/queue.php). */
+    public const QUEUE = 'assistant';
+
     private const FAILED_AR = 'تعذر إكمال الإجابة. أعد إرسال السؤال من فضلك.';
 
     public int $timeout = 900;
@@ -39,7 +42,9 @@ class RunAssistantQuestion implements ShouldBeUnique, ShouldQueue
         public string $conversationId,
         public string $text,
         public string $runId,
-    ) {}
+    ) {
+        $this->onConnection(self::QUEUE)->onQueue(self::QUEUE);
+    }
 
     public function uniqueId(): string
     {
@@ -49,7 +54,9 @@ class RunAssistantQuestion implements ShouldBeUnique, ShouldQueue
     public function handle(AssistantService $assistant, RunLog $log): void
     {
         $user = User::query()->find($this->userId);
-        if ($user === null) {
+
+        // Already finished: the page gave up waiting for a worker; answering now would only bill it.
+        if ($user === null || $log->isFinished($this->runId)) {
             return;
         }
 

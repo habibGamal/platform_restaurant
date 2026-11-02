@@ -49,7 +49,7 @@ final class RunLog
         $this->insert($runId, $userId, $conversationId, $event->type, $this->payload($event));
 
         if ($event->type === 'done' && $event->messageId !== null) {
-            AiRunEvent::query()->where('run_id', $runId)->update(['message_id' => $event->messageId]);
+            AiRunEvent::query()->where('run_id', $runId)->where('user_id', $userId)->update(['message_id' => $event->messageId]);
         }
     }
 

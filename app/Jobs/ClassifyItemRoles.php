@@ -21,7 +21,10 @@ class ClassifyItemRoles implements ShouldBeUnique, ShouldQueue
     /** Seconds the unique lock is held at most, so a killed worker cannot block the organization for good. */
     public int $uniqueFor = 900;
 
-    public function __construct(public int $organizationId) {}
+    public function __construct(public int $organizationId)
+    {
+        $this->onConnection(RunAssistantQuestion::QUEUE)->onQueue(RunAssistantQuestion::QUEUE);
+    }
 
     public function uniqueId(): string
     {

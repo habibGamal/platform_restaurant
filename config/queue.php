@@ -40,7 +40,19 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 960),
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            'after_commit' => false,
+        ],
+
+        // Assistant runs and item-role classification: long jobs with their own worker
+        // (`queue:work assistant --queue=assistant --timeout=900 --tries=1`). retry_after
+        // must exceed the assistant run timeout (900 s) so a running job is never handed out twice.
+        'assistant' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'assistant',
+            'retry_after' => (int) env('ASSISTANT_QUEUE_RETRY_AFTER', 960),
             'after_commit' => false,
         ],
 

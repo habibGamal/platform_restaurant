@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\App\Pages;
 
+use App\Domain\Assistant\AssistantEvent;
 use App\Domain\Assistant\AssistantReadiness;
 use App\Domain\Assistant\AssistantReadinessResult;
 use App\Domain\Assistant\Channel;
@@ -21,6 +22,7 @@ use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
@@ -69,6 +71,10 @@ class Assistant extends Page
     #[Locked]
     public int $lastSeq = 0;
 
+    /** Unix time the current run was sent or resumed; drives the waiting notice and the give-up. */
+    #[Locked]
+    public ?int $runStartedAt = null;
+
     /**
      * What the agents of the current run are doing, rebuilt from its run log.
      *
@@ -98,6 +104,16 @@ class Assistant extends Page
         'operations' => 'التشغيل',
         'data_checker' => 'مدقق البيانات',
     ];
+
+    /** No worker has written a row for the run yet after this many seconds: say it is queued. */
+    private const QUEUE_WAIT_NOTICE_SECONDS = 60;
+
+    /** Past the assistant queue's retry_after (960 s) plus a margin, no worker is coming. */
+    private const QUEUE_GIVE_UP_SECONDS = 1000;
+
+    private const QUEUE_WAIT_STATUS = 'لسه مستني دوره…';
+
+    private const QUEUE_UNAVAILABLE_AR = 'المساعد مش متاح دلوقتي. حاول تاني بعد شوية.';
 
     public function getHeading(): string|Htmlable|null
     {
@@ -244,6 +260,11 @@ class Assistant extends Page
             abort(400, 'A valid UUID runId is required.');
         }
 
+        // A run id is fresh per question; one already used by another user is not a valid request.
+        if (AiRunEvent::query()->where('run_id', $runId)->where('user_id', '<>', $user->id)->exists()) {
+            abort(400, 'A valid UUID runId is required.');
+        }
+
         $text = trim($this->prompt);
         if ($text === '') {
             return;
@@ -267,6 +288,7 @@ class Assistant extends Page
 
         $this->resetRun();
         $this->currentRunId = $runId;
+        $this->runStartedAt = now()->getTimestamp();
         $this->isStreaming = true;
         $this->streamedAnswer = '';
 
@@ -302,7 +324,16 @@ class Assistant extends Page
         $user = auth()->user();
         abort_unless($user instanceof User, 403);
 
-        foreach (app(RunLog::class)->since($this->currentRunId, $user->id, $this->lastSeq) as $row) {
+        $log = app(RunLog::class);
+        $rows = $log->since($this->currentRunId, $user->id, $this->lastSeq);
+
+        if ($rows === [] && $this->lastSeq === 0) {
+            $rows = $this->watchQueueWait($log, $user, $this->currentRunId);
+        } elseif ($rows !== [] && $this->toolStatus === self::QUEUE_WAIT_STATUS) {
+            $this->toolStatus = null;
+        }
+
+        foreach ($rows as $row) {
             $this->lastSeq = $row['seq'];
             $this->applyRunEvent($row['type'], $row['payload']);
 
@@ -310,6 +341,33 @@ class Assistant extends Page
                 break;
             }
         }
+    }
+
+    /**
+     * The run has no rows yet, so no worker has picked it up: after a minute say it is queued, and
+     * once the queue's retry window has passed log it as failed (a late worker then skips it).
+     *
+     * @return list<array{seq: int, type: string, payload: array<string, mixed>}> rows to apply now
+     */
+    private function watchQueueWait(RunLog $log, User $user, string $runId): array
+    {
+        $waited = now()->getTimestamp() - ($this->runStartedAt ?? now()->getTimestamp());
+
+        if ($waited < self::QUEUE_GIVE_UP_SECONDS) {
+            if ($waited >= self::QUEUE_WAIT_NOTICE_SECONDS) {
+                $this->toolStatus = self::QUEUE_WAIT_STATUS;
+            }
+
+            return [];
+        }
+
+        try {
+            $log->append($runId, $user->id, AssistantEvent::error('queue_unavailable', self::QUEUE_UNAVAILABLE_AR, $this->selectedConversationId), $this->selectedConversationId);
+        } catch (UniqueConstraintViolationException) {
+            // A worker wrote the run's first row at this very moment: show its rows instead.
+        }
+
+        return $log->since($runId, $user->id, $this->lastSeq);
     }
 
     public function stop(?string $runId = null): void
@@ -506,6 +564,7 @@ class Assistant extends Page
 
         $this->resetRun();
         $this->currentRunId = $runId;
+        $this->runStartedAt = now()->getTimestamp();
         $this->isStreaming = true;
         $this->streamedAnswer = '';
         $this->poll();
@@ -514,6 +573,7 @@ class Assistant extends Page
     private function resetRun(): void
     {
         $this->currentRunId = null;
+        $this->runStartedAt = null;
         $this->isStreaming = false;
         $this->lastSeq = 0;
         $this->workLog = ['plan' => null, 'agents' => []];

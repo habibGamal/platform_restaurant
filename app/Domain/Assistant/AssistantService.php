@@ -10,6 +10,7 @@ use App\Domain\AiBilling\BudgetGuard;
 use App\Domain\Assistant\Contracts\Assistant;
 use App\Jobs\RunAssistantQuestion;
 use App\Models\AiConversationMeta;
+use App\Models\AiRunEvent;
 use App\Models\User;
 use Generator;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -65,6 +66,11 @@ final class AssistantService implements Assistant
      */
     public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string
     {
+        // A run id that already has rows belongs to an earlier (or another user's) run: never write into it.
+        if (AiRunEvent::query()->where('run_id', $runId)->exists()) {
+            return $conversationId;
+        }
+
         $gateError = $this->gateError($user, $conversationId);
         if ($gateError !== null) {
             app(RunLog::class)->append($runId, $user->id, $gateError, $conversationId);
@@ -251,7 +257,8 @@ final class AssistantService implements Assistant
             return;
         }
 
-        Cache::put("ai:cancel:{$userId}:{$runId}", true, 600);
+        // Outlives the longest run (job timeout 900 s) plus its time in the queue.
+        Cache::put("ai:cancel:{$userId}:{$runId}", true, 960);
     }
 
     /**

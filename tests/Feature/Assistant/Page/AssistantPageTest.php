@@ -832,4 +832,99 @@ class AssistantPageTest extends TestCase
 
         $this->assertSame([$runId], $fakeAssistant->cancelledRunIds);
     }
+
+    public function test_a_run_no_worker_picked_up_says_it_is_still_waiting_after_a_minute(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $this->app->instance(AssistantContract::class, new FakeAssistant);
+        $runId = (string) Str::uuid();
+
+        $component = Livewire::test(AssistantPage::class)
+            ->set('prompt', 'سؤال')
+            ->call('send', $runId)
+            ->assertSet('toolStatus', null);
+
+        $this->travel(59)->seconds();
+        $component->call('poll')->assertSet('toolStatus', null);
+
+        $this->travel(2)->seconds();
+        $component->call('poll')
+            ->assertSet('isStreaming', true)
+            ->assertSet('toolStatus', 'لسه مستني دوره…')
+            ->assertSee('لسه مستني دوره…');
+
+        // Once the worker writes its first row the waiting notice goes away.
+        $this->seedRun($runId, [AssistantEvent::plan('هبدأ بالمؤشرات')]);
+        $component->call('poll')
+            ->assertSet('isStreaming', true)
+            ->assertSet('toolStatus', null);
+    }
+
+    public function test_a_run_no_worker_picked_up_gives_up_after_the_queue_retry_window(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $this->app->instance(AssistantContract::class, new FakeAssistant);
+        $runId = (string) Str::uuid();
+
+        $component = Livewire::test(AssistantPage::class)
+            ->set('prompt', 'سؤال')
+            ->call('send', $runId);
+
+        $this->travel(999)->seconds();
+        $component->call('poll')->assertSet('isStreaming', true);
+
+        $this->travel(1)->seconds();
+        $component->call('poll')
+            ->assertSet('isStreaming', false)
+            ->assertSet('errorCode', 'queue_unavailable')
+            ->assertSet('errorMessage', 'المساعد مش متاح دلوقتي. حاول تاني بعد شوية.')
+            ->assertSee('المساعد مش متاح دلوقتي. حاول تاني بعد شوية.')
+            ->assertDontSeeHtml('wire:poll.1s');
+
+        // Logged as finished, so a reload does not resume it and a late worker does not answer it.
+        $this->assertTrue((new RunLog)->isFinished($runId));
+    }
+
+    public function test_a_run_that_already_has_rows_is_not_given_up_on(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $this->app->instance(AssistantContract::class, new FakeAssistant);
+        $runId = (string) Str::uuid();
+
+        $component = Livewire::test(AssistantPage::class)
+            ->set('prompt', 'سؤال')
+            ->call('send', $runId);
+        $this->seedRun($runId, [AssistantEvent::toolCall('get_kpis')]);
+        $component->call('poll');
+
+        $this->travel(1200)->seconds();
+        $component->call('poll')
+            ->assertSet('isStreaming', true)
+            ->assertSet('errorCode', null);
+    }
+
+    public function test_send_refuses_a_run_id_another_user_already_used(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $fakeAssistant = new FakeAssistant;
+        $this->app->instance(AssistantContract::class, $fakeAssistant);
+        $runId = (string) Str::uuid();
+        (new RunLog)->append($runId, $this->deniedUser->id, AssistantEvent::toolCall('get_kpis'));
+
+        Livewire::test(AssistantPage::class)
+            ->set('prompt', 'سؤال')
+            ->call('send', $runId)
+            ->assertStatus(400);
+
+        $this->assertSame([], $fakeAssistant->startCalls);
+    }
+
+    public function test_the_run_start_time_cannot_be_set_from_the_client(): void
+    {
+        $this->actingAs($this->allowedOwner);
+
+        $this->expectException(CannotUpdateLockedPropertyException::class);
+
+        Livewire::test(AssistantPage::class)->set('runStartedAt', 0);
+    }
 }

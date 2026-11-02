@@ -11,6 +11,7 @@ use App\Domain\Assistant\AssistantService;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\RunLog;
 use App\Enums\OrganizationPlan;
+use App\Jobs\ClassifyItemRoles;
 use App\Jobs\RunAssistantQuestion;
 use App\Models\AiConversationMeta;
 use App\Models\AiRunEvent;
@@ -18,9 +19,11 @@ use App\Models\Organization;
 use App\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -255,6 +258,50 @@ final class QueuedRunTest extends TestCase
         $this->assertSame(['error'], $this->types($runId, $user->id));
     }
 
+    public function test_a_worker_skips_a_run_that_was_already_given_up_on(): void
+    {
+        $user = $this->user();
+        RestaurantAnalyst::fake(['answer']);
+        $runId = (string) Str::uuid();
+        $conversationId = (string) Str::uuid();
+        (new RunLog)->append($runId, $user->id, AssistantEvent::error('queue_unavailable', 'x', $conversationId), $conversationId);
+
+        (new RunAssistantQuestion($user->id, 'chat', $conversationId, 'q', $runId))->handle(app(AssistantService::class), new RunLog);
+
+        RestaurantAnalyst::assertNeverPrompted();
+        $this->assertSame(['error'], $this->types($runId, $user->id));
+    }
+
+    public function test_start_refuses_a_run_id_that_already_has_rows(): void
+    {
+        Queue::fake();
+        $user = $this->user();
+        $other = User::factory()->create(['organization_id' => $user->organization_id]);
+        $runId = (string) Str::uuid();
+        (new RunLog)->append($runId, $other->id, AssistantEvent::toolCall('get_kpis'));
+
+        $conversationId = app(AssistantService::class)->start($user, Channel::Chat, null, 'q', $runId);
+
+        $this->assertNull($conversationId);
+        Queue::assertNothingPushed();
+        $this->assertSame(0, AiRunEvent::query()->where('user_id', $user->id)->count());
+        $this->assertSame(0, AiConversationMeta::query()->where('user_id', $user->id)->count());
+    }
+
+    public function test_linking_the_saved_answer_touches_only_the_runs_own_rows(): void
+    {
+        $user = $this->user();
+        $other = User::factory()->create(['organization_id' => $user->organization_id]);
+        $runId = (string) Str::uuid();
+        $messageId = (string) Str::uuid();
+        (new RunLog)->append($runId, $other->id, AssistantEvent::toolCall('get_kpis'));
+
+        (new RunLog)->append($runId, $user->id, AssistantEvent::done((string) Str::uuid(), $messageId));
+
+        $this->assertNull(AiRunEvent::query()->where('user_id', $other->id)->value('message_id'));
+        $this->assertSame($messageId, AiRunEvent::query()->where('user_id', $user->id)->value('message_id'));
+    }
+
     public function test_the_job_is_unique_per_run_and_never_retried(): void
     {
         Queue::fake();
@@ -272,11 +319,80 @@ final class QueuedRunTest extends TestCase
         Queue::assertPushed(RunAssistantQuestion::class, 1);
     }
 
-    public function test_the_database_queue_waits_longer_than_the_job_timeout_before_retrying(): void
+    public function test_assistant_jobs_run_on_their_own_connection_and_queue(): void
     {
-        $config = require base_path('config/queue.php');
+        Queue::fake();
+        $runId = (string) Str::uuid();
 
-        $this->assertGreaterThan(900, $config['connections']['database']['retry_after']);
+        RunAssistantQuestion::dispatch(1, 'chat', (string) Str::uuid(), 'سؤال', $runId);
+        ClassifyItemRoles::dispatch(7);
+
+        Queue::assertPushed(RunAssistantQuestion::class, fn (RunAssistantQuestion $job): bool => $job->connection === 'assistant' && $job->queue === 'assistant');
+        Queue::assertPushed(ClassifyItemRoles::class, fn (ClassifyItemRoles $job): bool => $job->connection === 'assistant' && $job->queue === 'assistant');
+    }
+
+    public function test_the_assistant_queue_waits_longer_than_the_job_timeout_before_retrying(): void
+    {
+        $config = $this->queueConfigWithoutEnv(['ASSISTANT_QUEUE_RETRY_AFTER', 'DB_QUEUE_RETRY_AFTER']);
+        $assistant = $config['connections']['assistant'];
+        $job = new RunAssistantQuestion(1, 'chat', (string) Str::uuid(), 'سؤال', (string) Str::uuid());
+
+        $this->assertSame(['database', 'assistant', 960], [$assistant['driver'], $assistant['queue'], $assistant['retry_after']]);
+        $this->assertGreaterThan($job->timeout, $assistant['retry_after']);
+        // Other jobs keep the framework's short retry window.
+        $this->assertSame(90, $config['connections']['database']['retry_after']);
+    }
+
+    public function test_artisan_dev_runs_an_assistant_queue_listener(): void
+    {
+        $command = collect(DevCommands::commands())->firstWhere('name', 'assistant-queue');
+
+        $this->assertNotNull($command);
+        $this->assertSame('php artisan queue:listen assistant --queue=assistant --tries=1 --timeout=0', $command['command']);
+    }
+
+    public function test_a_stop_request_outlives_the_longest_run(): void
+    {
+        $user = $this->user();
+        $this->actingAs($user);
+        $runId = (string) Str::uuid();
+
+        app(AssistantService::class)->cancel($runId);
+
+        $this->travel(950)->seconds();
+        $this->assertTrue(Cache::has("ai:cancel:{$user->id}:{$runId}"));
+    }
+
+    /**
+     * config/queue.php as it reads with the given env vars unset (the local .env may set them).
+     *
+     * @param  list<string>  $names
+     * @return array<string, mixed>
+     */
+    private function queueConfigWithoutEnv(array $names): array
+    {
+        $saved = [];
+        foreach ($names as $name) {
+            $saved[$name] = [getenv($name), $_ENV[$name] ?? null, $_SERVER[$name] ?? null];
+            putenv($name);
+            unset($_ENV[$name], $_SERVER[$name]);
+        }
+
+        try {
+            return require base_path('config/queue.php');
+        } finally {
+            foreach ($saved as $name => [$env, $envArray, $server]) {
+                if ($env !== false) {
+                    putenv("{$name}={$env}");
+                }
+                if ($envArray !== null) {
+                    $_ENV[$name] = $envArray;
+                }
+                if ($server !== null) {
+                    $_SERVER[$name] = $server;
+                }
+            }
+        }
     }
 
     public function test_rows_older_than_thirty_days_are_pruned(): void

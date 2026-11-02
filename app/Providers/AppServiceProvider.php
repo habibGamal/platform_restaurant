@@ -6,6 +6,7 @@ use App\Ai\Gateway\BufferedChatCompletionsGateway;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
@@ -31,6 +32,16 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         $this->configureAiProviders();
+        $this->configureDevProcesses();
+    }
+
+    /**
+     * `php artisan dev` also runs a listener for the assistant queue, which the default
+     * `queue` process does not watch.
+     */
+    protected function configureDevProcesses(): void
+    {
+        DevCommands::artisan('queue:listen assistant --queue=assistant --tries=1 --timeout=0', 'assistant-queue');
     }
 
     /**
