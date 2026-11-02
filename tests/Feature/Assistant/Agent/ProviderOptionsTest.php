@@ -38,8 +38,10 @@ final class ProviderOptionsTest extends TestCase
         $this->assertSame('high', $options['output_config']['effort']);
     }
 
-    public function test_openai_mapping(): void
+    public function test_openai_mapping_on_responses_driver(): void
     {
+        config(['ai.providers.openai.driver' => 'openai']);
+
         $options = ProviderOptions::for('openai', 'high');
 
         $this->assertArrayHasKey('reasoning', $options);
@@ -47,18 +49,27 @@ final class ProviderOptionsTest extends TestCase
         $this->assertSame('high', $options['reasoning']['effort']);
     }
 
+    public function test_openai_mapping_on_chat_completions_driver(): void
+    {
+        config(['ai.providers.openai.driver' => 'openai-compatible']);
+
+        $this->assertSame(['reasoning_effort' => 'high'], ProviderOptions::for('openai', 'high'));
+    }
+
+    public function test_byo_provider_names_map_to_their_base_provider(): void
+    {
+        config(['ai.providers.openai.driver' => 'openai-compatible']);
+
+        $this->assertSame(['reasoning_effort' => 'low'], ProviderOptions::for('byo_openai_2', 'low'));
+        $this->assertSame(['thinking_level' => 'high'], ProviderOptions::for('byo_gemini_15', 'high'));
+        $this->assertSame([], ProviderOptions::for('byo_openai-compatible_3', 'high'));
+    }
+
     public function test_gemini_mapping(): void
     {
-        $optionsLow = ProviderOptions::for('gemini', 'low');
-        $this->assertArrayHasKey('thinking_config', $optionsLow);
-        $this->assertIsArray($optionsLow['thinking_config']);
-        $this->assertSame(1024, $optionsLow['thinking_config']['thinking_budget']);
-
-        $optionsHigh = ProviderOptions::for('gemini', 'high');
-        $this->assertSame(8192, $optionsHigh['thinking_config']['thinking_budget']);
-
-        $optionsMedium = ProviderOptions::for('gemini', 'medium');
-        $this->assertSame(4096, $optionsMedium['thinking_config']['thinking_budget']);
+        $this->assertSame(['thinking_level' => 'low'], ProviderOptions::for('gemini', 'low'));
+        $this->assertSame(['thinking_level' => 'medium'], ProviderOptions::for('gemini', 'medium'));
+        $this->assertSame(['thinking_level' => 'high'], ProviderOptions::for('gemini', 'high'));
     }
 
     public function test_other_providers_return_empty_array(): void

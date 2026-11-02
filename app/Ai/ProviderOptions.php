@@ -16,10 +16,15 @@ final class ProviderOptions
      */
     public static function for(Lab|string $provider, ?string $reasoningLevel = null, ?Channel $channel = null): array
     {
-        $providerKey = $provider instanceof Lab ? $provider->value : strtolower((string) $provider);
+        $providerKey = self::baseProviderKey($provider instanceof Lab ? $provider->value : strtolower((string) $provider));
 
         // Per-channel default: whatsapp low, chat medium; explicit reasoning level overrides default.
         $effort = $reasoningLevel ?? self::defaultForChannel($channel);
+
+        // The "openai" provider may run on the Chat Completions driver, which takes a flat `reasoning_effort`.
+        if ($providerKey === 'openai' && config('ai.providers.openai.driver') === 'openai-compatible') {
+            return ['reasoning_effort' => $effort];
+        }
 
         return match ($providerKey) {
             'anthropic' => [
@@ -39,13 +44,7 @@ final class ProviderOptions
                 ],
             ],
             'gemini' => [
-                'thinking_config' => [
-                    'thinking_budget' => match ($effort) {
-                        'low' => 1024,
-                        'high' => 8192,
-                        default => 4096,
-                    },
-                ],
+                'thinking_level' => $effort,
             ],
             default => [],
         };
@@ -59,6 +58,18 @@ final class ProviderOptions
     public static function map(Lab|string $provider, ?string $reasoningLevel = null, ?Channel $channel = null): array
     {
         return self::for($provider, $reasoningLevel, $channel);
+    }
+
+    /**
+     * Strip the on-demand BYO naming ("byo_{provider}_{orgId}") back to the configured provider key.
+     */
+    private static function baseProviderKey(string $providerKey): string
+    {
+        if (preg_match('/^byo_(.+)_\d+$/', $providerKey, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return $providerKey;
     }
 
     /**
