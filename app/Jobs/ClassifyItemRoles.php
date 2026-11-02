@@ -18,6 +18,9 @@ class ClassifyItemRoles implements ShouldBeUnique, ShouldQueue
 
     public int $timeout = 600;
 
+    /** Seconds the unique lock is held at most, so a killed worker cannot block the organization for good. */
+    public int $uniqueFor = 900;
+
     public function __construct(public int $organizationId) {}
 
     public function uniqueId(): string

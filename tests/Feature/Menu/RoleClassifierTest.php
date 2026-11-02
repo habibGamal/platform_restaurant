@@ -9,7 +9,9 @@ use App\Domain\Menu\ItemRole;
 use App\Domain\Menu\ItemRoles;
 use App\Domain\Menu\RoleClassifier;
 use App\Jobs\ClassifyItemRoles;
+use App\Models\AiModelPrice;
 use App\Models\AiSetting;
+use App\Models\AiUsageLedgerEntry;
 use App\Models\CategoryRoleAssignment;
 use App\Models\ItemRoleAssignment;
 use App\Models\Organization;
@@ -41,12 +43,13 @@ class RoleClassifierTest extends TestCase
      * (key => [role, confidence]); unknown items get a low-confidence side.
      *
      * @param  array<string, array{0: string, 1: float}>  $itemAnswers
+     * @param  array<string, array{0: string, 1: float}>  $categoryAnswers
      */
-    private function fakeModel(array $itemAnswers = []): void
+    private function fakeModel(array $itemAnswers = [], array $categoryAnswers = self::CATEGORY_ANSWERS): void
     {
-        ItemRoleClassifier::fake(function (string $prompt) use ($itemAnswers): array {
+        ItemRoleClassifier::fake(function (string $prompt) use ($itemAnswers, $categoryAnswers): array {
             $entries = json_decode(substr($prompt, (int) strpos($prompt, '[')), true);
-            $answers = str_contains($prompt, 'categories') ? self::CATEGORY_ANSWERS : $itemAnswers;
+            $answers = str_contains($prompt, 'categories') ? $categoryAnswers : $itemAnswers;
 
             return ['items' => array_map(
                 fn (array $entry): array => [
@@ -181,7 +184,7 @@ class RoleClassifierTest extends TestCase
         $this->assertSame(0, ItemRoleAssignment::query()->count());
     }
 
-    public function test_skips_org_with_exhausted_budget(): void
+    public function test_exhausted_budget_still_applies_hard_roles_but_makes_no_model_call(): void
     {
         $f = MenuFixture::create();
         AiSetting::factory()->create([
@@ -193,9 +196,131 @@ class RoleClassifierTest extends TestCase
 
         $result = $this->classifier()->classify($f->organization);
 
-        $this->assertSame(0, $result['classified']);
         ItemRoleClassifier::assertNeverPrompted();
-        $this->assertSame(0, ItemRoleAssignment::query()->count());
+        $this->assertSame(0, AiUsageLedgerEntry::query()->count());
+        $this->assertSame(0, CategoryRoleAssignment::query()->count());
+        $this->assertSame(2, $result['classified']);
+        $this->assertSame(
+            ['BULK-FLOUR' => 'signal', 'DIFF-LINE' => 'signal'],
+            ItemRoleAssignment::query()->orderBy('item_key')->pluck('source', 'item_key')->all(),
+        );
+    }
+
+    public function test_budget_running_out_mid_run_keeps_stored_rows_and_stops_asking(): void
+    {
+        $f = MenuFixture::create();
+        AiSetting::factory()->create([
+            'organization_id' => $f->organization->id,
+            'monthly_budget_egp' => 100,
+            'hard_stop' => true,
+        ]);
+        AiModelPrice::query()->create([
+            'provider' => 'openai',
+            'model' => 'gpt-test',
+            'input_per_1m' => 100,
+            'output_per_1m' => 100,
+            'cache_read_per_1m' => 0,
+            'cache_write_per_1m' => 0,
+            'currency' => 'USD',
+            'effective_from' => '2020-01-01',
+        ]);
+        // The category call answers for the four categories (extras mixed) and costs far more than the budget.
+        ItemRoleClassifier::fake(function (string $prompt): StructuredTextResponse {
+            $entries = json_decode(substr($prompt, (int) strpos($prompt, '[')), true);
+            $items = array_map(fn (array $e): array => [
+                'key' => $e['key'],
+                'role' => ['mains' => 'main', 'sides' => 'side', 'drinks' => 'drink'][$e['key']] ?? 'mixed',
+                'confidence' => 0.9,
+            ], $entries);
+
+            return new StructuredTextResponse(
+                ['items' => $items],
+                '{}',
+                new TextUsage(inputTokens: 1_000_000, outputTokens: 0),
+                new Meta('openai', 'gpt-test'),
+            );
+        });
+
+        $this->classifier()->classify($f->organization);
+
+        // Only the category call happened; the one item left in the mixed category was never asked about.
+        ItemRoleClassifier::assertPromptedTimes(1);
+        $this->assertSame(1, AiUsageLedgerEntry::query()->count());
+        $this->assertSame(4, CategoryRoleAssignment::query()->count());
+        $this->assertSame('main', ItemRoleAssignment::query()->where('item_key', 'ZORBA-PLATE')->value('role'));
+        $this->assertDatabaseMissing('item_roles', ['item_key' => 'GLAZE-DIP']);
+    }
+
+    public function test_items_judged_within_the_reclassify_window_are_not_asked_again(): void
+    {
+        $f = MenuFixture::create();
+        $orgId = $f->organization->id;
+        $assign = fn (string $key, string $classifiedAt) => ItemRoleAssignment::query()->create([
+            'organization_id' => $orgId,
+            'item_key' => $key,
+            'role' => 'side',
+            'source' => 'auto',
+            'confidence' => 0.40,
+            'classified_at' => $classifiedAt,
+        ]);
+        $assign('ZORBA-PLATE', now()->subDays(2)->toDateTimeString());
+        $assign('KELTO-WRAP', now()->subDays(10)->toDateTimeString());
+        $this->fakeModel();
+
+        $map = app(ItemRoles::class)->ensureClassified($f->organization, ['ZORBA-PLATE', 'KELTO-WRAP']);
+
+        // Zorba stays untrusted and untouched; Kelto was old enough to be re-judged.
+        $this->assertFalse($map->isTrusted('ZORBA-PLATE'));
+        $this->assertSame(ItemRole::Main, $map->roleOf('KELTO-WRAP'));
+        $zorba = ItemRoleAssignment::query()->where('item_key', 'ZORBA-PLATE')->firstOrFail();
+        $this->assertSame(['side', '0.40'], [$zorba->role, $zorba->confidence]);
+
+        // The full run honours the same window.
+        $this->classifier()->classify($f->organization);
+        $this->assertSame('0.40', ItemRoleAssignment::query()->where('item_key', 'ZORBA-PLATE')->value('confidence'));
+    }
+
+    public function test_a_category_below_the_trust_threshold_falls_through_to_per_item_classification(): void
+    {
+        $f = MenuFixture::create();
+        $this->fakeModel(
+            ['ZORBA-PLATE' => ['combo', 0.85], 'KELTO-WRAP' => ['main', 0.75]],
+            ['mains' => ['main', 0.60], 'sides' => ['side', 0.90], 'drinks' => ['drink', 0.90], 'extras' => ['mixed', 0.60]],
+        );
+
+        $this->classifier()->classify($f->organization, ['ZORBA-PLATE', 'KELTO-WRAP']);
+
+        $this->assertSame('0.60', CategoryRoleAssignment::query()->where('category_key', 'mains')->value('confidence'));
+        ItemRoleClassifier::assertPromptedTimes(2);
+        ItemRoleClassifier::assertPrompted(fn ($p) => str_contains($p->prompt, 'ZORBA-PLATE') && ! str_contains($p->prompt, 'categories'));
+        $this->assertSame('combo', ItemRoleAssignment::query()->where('item_key', 'ZORBA-PLATE')->value('role'));
+        $this->assertSame('0.85', ItemRoleAssignment::query()->where('item_key', 'ZORBA-PLATE')->value('confidence'));
+    }
+
+    public function test_an_owner_assignment_made_during_the_model_call_is_not_overwritten(): void
+    {
+        $f = MenuFixture::create();
+        $orgId = $f->organization->id;
+        ItemRoleClassifier::fake(function (string $prompt) use ($orgId): array {
+            $entries = json_decode(substr($prompt, (int) strpos($prompt, '[')), true);
+            $isCategories = str_contains($prompt, 'categories');
+            if (! $isCategories) {
+                // The owner decides while the model is still answering.
+                app(ItemRoles::class)->setOwnerRole($orgId, 'GLAZE-DIP', ItemRole::Drink);
+            }
+
+            return ['items' => array_map(fn (array $e): array => [
+                'key' => $e['key'],
+                'role' => $isCategories ? 'mixed' : 'addon',
+                'confidence' => 0.9,
+            ], $entries)];
+        });
+
+        $this->classifier()->classify($f->organization);
+
+        $row = ItemRoleAssignment::query()->where('item_key', 'GLAZE-DIP')->firstOrFail();
+        $this->assertSame(['drink', 'owner'], [$row->role, $row->source]);
+        $this->assertSame('addon', ItemRoleAssignment::query()->where('item_key', 'ZORBA-PLATE')->value('role'));
     }
 
     public function test_window_is_anchored_on_the_latest_business_date_not_today(): void
@@ -266,6 +391,14 @@ class RoleClassifierTest extends TestCase
         $job->handle($this->classifier());
 
         $this->assertDatabaseHas('item_roles', ['organization_id' => $f->organization->id, 'item_key' => 'ZORBA-PLATE']);
+    }
+
+    public function test_job_lock_expires_so_a_killed_worker_cannot_block_the_organization(): void
+    {
+        $job = new ClassifyItemRoles(1);
+
+        $this->assertSame(900, $job->uniqueFor);
+        $this->assertGreaterThan($job->timeout, $job->uniqueFor);
     }
 
     public function test_job_ignores_a_deleted_organization(): void

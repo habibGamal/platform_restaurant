@@ -48,9 +48,12 @@ final class RoleClassifier
      */
     public function classify(Organization $organization, ?array $onlyItemKeys = null): array
     {
-        if ($this->aiUnavailable($organization)) {
+        if (! $this->access->allowsOrganization($organization)) {
             return ['classified' => 0, 'skipped' => count($onlyItemKeys ?? [])];
         }
+
+        // With the budget spent only the data-only roles apply: no model call is made.
+        $budgetSpent = $this->budget->projectedExceeds($organization, 0.0);
 
         $to = $this->latestBusinessDate($organization->id);
         if ($to === null) {
@@ -62,6 +65,7 @@ final class RoleClassifier
 
         $ownerKeys = array_flip($this->ownerKeys($organization->id));
         $trusted = $this->itemRoles->mapFor($organization->id);
+        $recentlyJudged = array_flip($this->recentlyJudgedKeys($organization->id));
 
         $classified = 0;
         $skipped = 0;
@@ -88,7 +92,8 @@ final class RoleClassifier
                 continue;
             }
 
-            if ($trusted->isTrusted($key)) {
+            // Trusted already, or judged recently enough that asking again would only cost tokens.
+            if ($trusted->isTrusted($key) || isset($recentlyJudged[$key])) {
                 $skipped++;
 
                 continue;
@@ -99,8 +104,8 @@ final class RoleClassifier
 
         $classified += $this->persist($organization->id, $hard);
 
-        if ($pending === []) {
-            return ['classified' => $classified, 'skipped' => $skipped];
+        if ($pending === [] || $budgetSpent) {
+            return ['classified' => $classified, 'skipped' => $skipped + count($pending)];
         }
 
         $categoryRoles = $this->classifyCategories($organization, $pending, $all);
@@ -318,12 +323,33 @@ final class RoleClassifier
             ];
         }
 
+        // New rows are inserted; rows that exist are updated only while they are not owner-set, so an
+        // owner assignment made after the check above is still never overwritten.
         foreach (array_chunk($payload, 500) as $chunk) {
-            ItemRoleAssignment::query()->upsert(
+            ItemRoleAssignment::query()->insertOrIgnore(array_map(
+                fn (array $row): array => $row + ['created_at' => $now, 'updated_at' => $now],
                 $chunk,
-                ['organization_id', 'item_key'],
-                ['role', 'source', 'confidence', 'classified_at'],
-            );
+            ));
+        }
+
+        $groups = [];
+        foreach ($payload as $row) {
+            $groups[$row['role'].'|'.$row['source'].'|'.$row['confidence']][] = $row;
+        }
+        foreach ($groups as $group) {
+            foreach (array_chunk($group, 500) as $chunk) {
+                ItemRoleAssignment::query()
+                    ->where('organization_id', $organizationId)
+                    ->whereIn('item_key', array_column($chunk, 'item_key'))
+                    ->where('source', '<>', 'owner')
+                    ->update([
+                        'role' => $chunk[0]['role'],
+                        'source' => $chunk[0]['source'],
+                        'confidence' => $chunk[0]['confidence'],
+                        'classified_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+            }
         }
 
         return count($payload);
@@ -340,10 +366,22 @@ final class RoleClassifier
             ->all();
     }
 
-    private function aiUnavailable(Organization $organization): bool
+    /**
+     * Items a model or the data judged within the reclassify window, whatever the confidence.
+     *
+     * @return array<int, string>
+     */
+    private function recentlyJudgedKeys(int $organizationId): array
     {
-        return ! $this->access->allowsOrganization($organization)
-            || $this->budget->projectedExceeds($organization, 0.0);
+        $days = (int) config('ai.roles.reclassify_after_days', 7);
+
+        return ItemRoleAssignment::query()
+            ->where('organization_id', $organizationId)
+            ->where('source', '<>', 'owner')
+            ->where('classified_at', '>=', now()->subDays($days))
+            ->pluck('item_key')
+            ->map(fn ($key): string => (string) $key)
+            ->all();
     }
 
     private function latestBusinessDate(int $organizationId): ?CarbonImmutable

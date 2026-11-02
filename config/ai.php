@@ -33,6 +33,8 @@ return [
 
     'roles' => [
         'trusted_confidence' => env('AI_ROLES_TRUSTED_CONFIDENCE', 0.70),
+        // An item judged within this many days is not sent to the model again, even at low confidence.
+        'reclassify_after_days' => env('AI_ROLES_RECLASSIFY_AFTER_DAYS', 7),
     ],
 
     /*
