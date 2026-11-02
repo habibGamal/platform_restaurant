@@ -8,48 +8,90 @@ use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant;
 use App\Domain\Assistant\GroundingResult;
 use App\Domain\Assistant\NumericGroundingChecker;
+use App\Domain\Menu\ItemRole;
+use App\Domain\Menu\ItemRoles;
+use App\Models\CatalogItem;
 use Illuminate\Support\Facades\Event;
+use InvalidArgumentException;
 use Laravel\Ai\Events\ToolInvoked;
 use Laravel\Ai\Tools\AgentTool;
+use Tests\Fixtures\MenuFixture;
 use Tests\Fixtures\TwoBranchesTwoWeeks;
 use Throwable;
 
+/**
+ * @phpstan-type EvalCase array{
+ *     id: string,
+ *     category: string,
+ *     persona: string,
+ *     question: string,
+ *     expected_tools: list<string>,
+ *     expected_numbers: list<int|float>,
+ *     must_refuse: bool,
+ *     fixture?: string,
+ *     rules?: list<string>
+ * }
+ *
+ * A case's `fixture` ('two_branches' by default, or 'menu') picks the seeded dataset it runs against.
+ * Its `rules` come from a closed set, each graded against the run's transcript:
+ *  - no_delegation: no specialist agent was called
+ *  - delegates:<agent>: the named specialist agent was called
+ *  - focus_excludes_roles:<role>,...: no item named under the «ركز على» section has one of those roles
+ *  - combos_one_main_above_floor: every combo_builder combo has exactly one main and margin_pct >= margin_floor_pct;
+ *    a run without combo_builder combos must not propose combos naming menu items
+ *  - grounded: the NumericGroundingChecker finds every number of the answer in the tool results
+ */
 class EvalRunner
 {
+    /** Tool names under which the coordinator delegates to a specialist agent. */
+    private const SPECIALISTS = ['marketing_specialist', 'finance_specialist', 'operations_specialist', 'data_checker'];
+
+    private const FOCUS_SECTION = 'ركز على';
+
+    private const COMBO_SECTION = 'كومبو مقترح';
+
+    /** Section headings of a marketing answer. */
+    private const SECTIONS = [self::FOCUS_SECTION, 'متلمسش', self::COMBO_SECTION, 'أفكار'];
+
+    /** Owner-set roles for the menu fixture, so evals never call the role classifier. */
+    private const MENU_ROLES = [
+        'ZORBA-PLATE' => ItemRole::Main,
+        'KELTO-WRAP' => ItemRole::Main,
+        'BRIMO-BOX' => ItemRole::Main,
+        'NADD-BOWL' => ItemRole::Main,
+        'FETA-TOWER' => ItemRole::Main,
+        'QUILL-STEW' => ItemRole::Main,
+        'LUMO-RICE' => ItemRole::Side,
+        'PEXA-SALAD' => ItemRole::Side,
+        'VIRA-SODA' => ItemRole::Drink,
+        'TINY-SPRING' => ItemRole::Drink,
+        'GLAZE-DIP' => ItemRole::Addon,
+        'DIFF-LINE' => ItemRole::Adjustment,
+        'BULK-FLOUR' => ItemRole::Raw,
+    ];
+
+    private bool $menuRolesSeeded = false;
+
     public function __construct(
         protected NumericGroundingChecker $groundingChecker,
         protected ?TwoBranchesTwoWeeks $fixture = null,
+        protected ?MenuFixture $menuFixture = null,
     ) {}
 
     /**
-     * Load the dataset cases.
+     * Load the dataset cases of one version (tests/Evals/questions.<version>.php).
      *
-     * @return list<array{
-     *     id: string,
-     *     category: string,
-     *     persona: string,
-     *     question: string,
-     *     expected_tools: list<string>,
-     *     expected_numbers: list<int|float>,
-     *     must_refuse: bool
-     * }>
+     * @return list<EvalCase>
      */
-    public function loadCases(?int $limit = null): array
+    public function loadCases(?int $limit = null, string $version = 'v0'): array
     {
-        $path = dirname(__DIR__, 4).'/tests/Evals/questions.v0.php';
+        $file = 'tests/Evals/questions.'.$version.'.php';
+        $path = dirname(__DIR__, 4).'/'.$file;
         if (! file_exists($path)) {
-            $path = base_path('tests/Evals/questions.v0.php');
+            $path = base_path($file);
         }
 
-        /** @var list<array{
-         *     id: string,
-         *     category: string,
-         *     persona: string,
-         *     question: string,
-         *     expected_tools: list<string>,
-         *     expected_numbers: list<int|float>,
-         *     must_refuse: bool
-         * }> $dataset */
+        /** @var list<EvalCase> $dataset */
         $dataset = require $path;
 
         if ($limit !== null && $limit > 0) {
@@ -62,15 +104,7 @@ class EvalRunner
     /**
      * Run evaluation against the loaded cases.
      *
-     * @param  list<array{
-     *     id: string,
-     *     category: string,
-     *     persona: string,
-     *     question: string,
-     *     expected_tools: list<string>,
-     *     expected_numbers: list<int|float>,
-     *     must_refuse: bool
-     * }>|null  $customCases
+     * @param  list<EvalCase>|null  $customCases
      * @param  (callable(int, int, EvalCaseResult): void)|null  $onProgress
      */
     public function run(
@@ -82,9 +116,6 @@ class EvalRunner
     ): EvalReport {
         $cases = $customCases ?? $this->loadCases($limit);
 
-        // Seed fixture into current DB connection
-        $fixture = $this->fixture ?? TwoBranchesTwoWeeks::create();
-
         /** @var Assistant $assistant */
         $assistant = app(Assistant::class);
 
@@ -92,7 +123,7 @@ class EvalRunner
         $totalCases = count($cases);
 
         foreach ($cases as $index => $case) {
-            $result = $this->evaluateCase($assistant, $fixture, $case);
+            $result = $this->evaluateCase($assistant, $this->fixtureFor($case), $case);
             $results[] = $result;
 
             if ($onProgress !== null) {
@@ -106,23 +137,19 @@ class EvalRunner
     /**
      * Evaluate a single test case.
      *
-     * @param  array{
-     *     id: string,
-     *     category: string,
-     *     persona: string,
-     *     question: string,
-     *     expected_tools: list<string>,
-     *     expected_numbers: list<int|float>,
-     *     must_refuse: bool
-     * }  $case
+     * @param  EvalCase  $case
      */
-    public function evaluateCase(Assistant $assistant, TwoBranchesTwoWeeks $fixture, array $case): EvalCaseResult
+    public function evaluateCase(Assistant $assistant, TwoBranchesTwoWeeks|MenuFixture $fixture, array $case): EvalCaseResult
     {
         $capturedTools = [];
         $capturedResults = [];
+        /** @var list<string> $delegatedAgents */
+        $delegatedAgents = [];
+        /** @var list<array{tool: string, result: mixed}> $toolResults */
+        $toolResults = [];
 
         // Set up ToolInvoked listener for this case run
-        $listener = function (ToolInvoked $event) use (&$capturedTools, &$capturedResults): void {
+        $listener = function (ToolInvoked $event) use (&$capturedTools, &$capturedResults, &$delegatedAgents, &$toolResults): void {
             $toolName = method_exists($event->tool, 'name')
                 ? $event->tool->name()
                 : class_basename($event->tool);
@@ -130,8 +157,11 @@ class EvalRunner
             $capturedTools[] = $toolName;
             // A specialist's model-authored narrative is not numerical evidence.
             // Its underlying tool invocations are captured independently by this listener.
-            if (! $event->tool instanceof AgentTool) {
+            if ($event->tool instanceof AgentTool) {
+                $delegatedAgents[] = $toolName;
+            } else {
                 $capturedResults[] = $event->result;
+                $toolResults[] = ['tool' => $toolName, 'result' => $event->result];
             }
         };
 
@@ -237,7 +267,20 @@ class EvalRunner
             }
         }
 
-        $passed = $toolsPassed && $permissionPassed && $groundingPassed;
+        // 4. Grade Rules
+        $rules = $case['rules'] ?? [];
+        $ruleFailures = $this->gradeRules(
+            rules: $rules,
+            calledTools: $allCalledTools,
+            delegatedAgents: $delegatedAgents,
+            toolResults: $toolResults,
+            replyText: $replyText,
+            grounding: $groundingResult,
+            organizationId: $fixture->organization->id,
+        );
+        $rulesPassed = $ruleFailures === [];
+
+        $passed = $toolsPassed && $permissionPassed && $groundingPassed && $rulesPassed;
 
         return new EvalCaseResult(
             caseId: $case['id'],
@@ -255,7 +298,214 @@ class EvalRunner
             permissionPassed: $permissionPassed,
             passed: $passed,
             error: $error,
+            rules: $rules,
+            ruleFailures: $ruleFailures,
+            rulesPassed: $rulesPassed,
         );
+    }
+
+    /**
+     * The seeded fixture a case runs against, created on first use.
+     *
+     * @param  EvalCase  $case
+     */
+    protected function fixtureFor(array $case): TwoBranchesTwoWeeks|MenuFixture
+    {
+        $name = $case['fixture'] ?? 'two_branches';
+
+        if ($name === 'two_branches') {
+            return $this->fixture ??= TwoBranchesTwoWeeks::create();
+        }
+
+        if ($name !== 'menu') {
+            throw new InvalidArgumentException("Unknown eval fixture [{$name}] in case [{$case['id']}].");
+        }
+
+        $this->menuFixture ??= MenuFixture::create();
+        if (! $this->menuRolesSeeded) {
+            $roles = app(ItemRoles::class);
+            foreach (self::MENU_ROLES as $itemKey => $role) {
+                $roles->setOwnerRole($this->menuFixture->organization->id, $itemKey, $role);
+            }
+            $this->menuRolesSeeded = true;
+        }
+
+        return $this->menuFixture;
+    }
+
+    /**
+     * Grade a case's rules against its run.
+     *
+     * @param  list<string>  $rules
+     * @param  list<string>  $calledTools
+     * @param  list<string>  $delegatedAgents
+     * @param  list<array{tool: string, result: mixed}>  $toolResults
+     * @return array<string, string> failed rule => why it failed
+     */
+    protected function gradeRules(
+        array $rules,
+        array $calledTools,
+        array $delegatedAgents,
+        array $toolResults,
+        string $replyText,
+        GroundingResult $grounding,
+        int $organizationId,
+    ): array {
+        $failures = [];
+
+        foreach ($rules as $rule) {
+            [$name, $argument] = array_pad(explode(':', $rule, 2), 2, '');
+
+            $failure = match ($name) {
+                'no_delegation' => $this->checkNoDelegation($calledTools, $delegatedAgents),
+                'delegates' => in_array($argument, $calledTools, true) ? null : "{$argument} was not called.",
+                'focus_excludes_roles' => $this->checkFocusExcludesRoles($argument, $replyText, $organizationId),
+                'combos_one_main_above_floor' => $this->checkCombos($toolResults, $replyText, $organizationId),
+                'grounded' => $grounding->grounded ? null : 'Ungrounded numbers: '.implode(', ', $grounding->ungrounded).'.',
+                default => 'Unknown rule.',
+            };
+
+            if ($failure !== null) {
+                $failures[$rule] = $failure;
+            }
+        }
+
+        return $failures;
+    }
+
+    /**
+     * @param  list<string>  $calledTools
+     * @param  list<string>  $delegatedAgents
+     */
+    private function checkNoDelegation(array $calledTools, array $delegatedAgents): ?string
+    {
+        $called = array_values(array_unique(array_merge(
+            $delegatedAgents,
+            array_intersect($calledTools, self::SPECIALISTS),
+        )));
+
+        return $called === [] ? null : 'Delegated to: '.implode(', ', $called).'.';
+    }
+
+    private function checkFocusExcludesRoles(string $roleList, string $replyText, int $organizationId): ?string
+    {
+        $excluded = array_values(array_filter(array_map('trim', explode(',', $roleList))));
+        $unknown = array_values(array_filter($excluded, fn (string $role): bool => ItemRole::tryFrom($role) === null));
+        if ($excluded === [] || $unknown !== []) {
+            return 'Unknown roles: '.implode(', ', $unknown).'.';
+        }
+
+        $section = $this->section($replyText, self::FOCUS_SECTION);
+        if ($section === null) {
+            return null;
+        }
+
+        $roleMap = app(ItemRoles::class)->mapFor($organizationId);
+        $offenders = [];
+        foreach ($this->mentionedItems($section, $organizationId) as $itemKey => $itemName) {
+            $role = $roleMap->roleOf($itemKey);
+            if ($role !== null && in_array($role->value, $excluded, true)) {
+                $offenders[] = "{$itemName} ({$role->value})";
+            }
+        }
+
+        return $offenders === [] ? null : 'Focus section names: '.implode(', ', $offenders).'.';
+    }
+
+    /**
+     * @param  list<array{tool: string, result: mixed}>  $toolResults
+     */
+    private function checkCombos(array $toolResults, string $replyText, int $organizationId): ?string
+    {
+        $problems = [];
+        $comboCount = 0;
+
+        foreach ($toolResults as $call) {
+            if ($call['tool'] !== 'combo_builder') {
+                continue;
+            }
+
+            $decoded = is_string($call['result']) ? json_decode($call['result'], true) : null;
+            if (! is_array($decoded)) {
+                $problems[] = 'unreadable combo_builder result';
+
+                continue;
+            }
+
+            $payload = is_array($decoded['metrics'] ?? null) ? $decoded['metrics'] : $decoded;
+            $combos = is_array($payload['combos'] ?? null) ? $payload['combos'] : [];
+            $floor = $payload['margin_floor_pct'] ?? null;
+
+            foreach ($combos as $combo) {
+                $comboCount++;
+                $items = is_array($combo['items'] ?? null) ? $combo['items'] : [];
+                $mains = count(array_filter($items, fn (mixed $item): bool => is_array($item) && ($item['role'] ?? null) === 'main'));
+                if ($mains !== 1) {
+                    $problems[] = "combo {$comboCount} has {$mains} main items";
+                }
+
+                $margin = $combo['margin_pct'] ?? null;
+                if (! is_numeric($margin) || ! is_numeric($floor)) {
+                    $problems[] = "combo {$comboCount} lacks margin_pct or margin_floor_pct";
+                } elseif ((float) $margin < (float) $floor) {
+                    $problems[] = "combo {$comboCount} margin {$margin} is below the floor {$floor}";
+                }
+            }
+        }
+
+        // Without combo_builder combos the answer must not propose any: a combo section naming items was invented.
+        if ($comboCount === 0) {
+            $section = $this->section($replyText, self::COMBO_SECTION);
+            if ($section !== null && $this->mentionedItems($section, $organizationId) !== []) {
+                $problems[] = 'the answer proposes combos that combo_builder never returned';
+            }
+        }
+
+        return $problems === [] ? null : ucfirst(implode('; ', $problems)).'.';
+    }
+
+    /** The answer text under a section heading, up to the next known heading; null when the heading is absent. */
+    private function section(string $text, string $heading): ?string
+    {
+        $start = mb_strpos($text, $heading);
+        if ($start === false) {
+            return null;
+        }
+
+        $from = $start + mb_strlen($heading);
+        $end = mb_strlen($text);
+        foreach (self::SECTIONS as $other) {
+            $position = $other === $heading ? false : mb_strpos($text, $other, $from);
+            if ($position !== false && $position < $end) {
+                $end = $position;
+            }
+        }
+
+        return mb_substr($text, $from, $end - $from);
+    }
+
+    /**
+     * The organization's catalog items whose name or key appears in the text.
+     *
+     * @return array<string, string> item key => name
+     */
+    private function mentionedItems(string $text, int $organizationId): array
+    {
+        $mentioned = [];
+        $items = CatalogItem::query()
+            ->where('organization_id', $organizationId)
+            ->whereNotNull('product_ref')
+            ->get(['product_ref', 'canonical_name']);
+
+        foreach ($items as $item) {
+            $key = (string) $item->product_ref;
+            $name = (string) $item->canonical_name;
+            if (($name !== '' && mb_stripos($text, $name) !== false) || mb_stripos($text, $key) !== false) {
+                $mentioned[$key] = $name !== '' ? $name : $key;
+            }
+        }
+
+        return $mentioned;
     }
 
     /**

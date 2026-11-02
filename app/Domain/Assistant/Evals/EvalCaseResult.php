@@ -12,6 +12,8 @@ final readonly class EvalCaseResult
      * @param  list<string>  $calledTools
      * @param  list<string>  $expectedTools
      * @param  list<int|float>  $expectedNumbers
+     * @param  list<string>  $rules
+     * @param  array<string, string>  $ruleFailures  failed rule => why it failed
      */
     public function __construct(
         public string $caseId,
@@ -29,6 +31,9 @@ final readonly class EvalCaseResult
         public bool $permissionPassed,
         public bool $passed,
         public ?string $error = null,
+        public array $rules = [],
+        public array $ruleFailures = [],
+        public bool $rulesPassed = true,
     ) {}
 
     /**
@@ -53,6 +58,9 @@ final readonly class EvalCaseResult
             'permission_passed' => $this->permissionPassed,
             'passed' => $this->passed,
             'error' => $this->error,
+            'rules' => $this->rules,
+            'rule_failures' => $this->ruleFailures,
+            'rules_passed' => $this->rulesPassed,
         ];
     }
 }
