@@ -15,6 +15,21 @@ enum ItemRole: string
     case Adjustment = 'adjustment';
     case Raw = 'raw';
 
+    /** Arabic name shown in the owner-facing UI. */
+    public function label(): string
+    {
+        return match ($this) {
+            self::Main => 'طبق رئيسي',
+            self::Side => 'طبق جانبي',
+            self::Drink => 'مشروب',
+            self::Dessert => 'حلو',
+            self::Addon => 'إضافة',
+            self::Combo => 'كومبو/عرض',
+            self::Adjustment => 'سطر تسوية',
+            self::Raw => 'خامة',
+        };
+    }
+
     /** Whether items of this role may appear in marketing focus lists. */
     public function isMarketable(): bool
     {

@@ -323,6 +323,7 @@ class AiSettingsPage extends Page
             $this->saveAction(),
             $this->testConnectionAction(),
             $this->openAssistantAction(),
+            $this->itemRolesAction(),
         ];
     }
 
@@ -355,6 +356,15 @@ class AiSettingsPage extends Page
             ->icon(Heroicon::OutlinedSparkles)
             ->color('gray')
             ->url(fn (): string => Assistant::getUrl());
+    }
+
+    public function itemRolesAction(): Action
+    {
+        return Action::make('item_roles')
+            ->label('مراجعة أدوار الأصناف')
+            ->icon(Heroicon::OutlinedTag)
+            ->color('gray')
+            ->url(fn (): string => ItemRolesPage::getUrl());
     }
 
     public function removeByoKeyAction(): Action
@@ -532,7 +542,6 @@ class AiSettingsPage extends Page
             /** @var array<string, mixed> $baseConfig */
             $baseConfig = config("ai.providers.{$providerName}", ['driver' => $providerName]);
             $onDemandName = "byo_test_{$providerName}_{$org->id}";
-
             try {
                 $built = Ai::build(array_merge($baseConfig, [
                     'name' => $onDemandName,
@@ -553,7 +562,7 @@ class AiSettingsPage extends Page
 
         try {
             $agent = new AnonymousAgent('You are a connectivity test agent.', [], []);
-            $agent->prompt('ping', provider: $providerName, model: $model, timeout: 5);
+            $agent->prompt('ping', provider: $providerName, model: $model, timeout: 30);
 
             Notification::make()
                 ->title('تم الاتصال بنجاح')
@@ -578,12 +587,18 @@ class AiSettingsPage extends Page
                 ->body('خوادم مزود الخدمة تواجه ضغطاً كبيراً حالياً.')
                 ->danger()
                 ->send();
-        } catch (ProviderConnectionException) {
+        } catch (ProviderConnectionException $e) {
             Notification::make()
                 ->title('فشل اختبار الاتصال')
-                ->body('فشل الاتصال بمزود الخدمة. يرجى التحقق من مفتاح الربط والاتصال.')
+                ->body('تعذر الوصول إلى مزود الخدمة أو انتهت مهلة الاتصال. يرجى التحقق من اتصال الخادم ثم إعادة المحاولة.')
                 ->danger()
                 ->send();
+            logger()->error('فشل اختبار الاتصال بمزود الذكاء الاصطناعي.', [
+                'provider' => $providerName,
+                'model' => $model,
+                'organization_id' => $org->id,
+                'timeout' => str_contains($e->getPrevious()?->getMessage() ?? '', 'cURL error 28'),
+            ]);
         } catch (RequestException $e) {
             $status = $e->response->status();
             Notification::make()
@@ -646,6 +661,7 @@ class AiSettingsPage extends Page
         $curated = [
             'anthropic' => 'Anthropic (Claude)',
             'openai' => 'OpenAI (ChatGPT)',
+            'openai-compatible' => 'OpenAI-compatible (AGY API)',
             'gemini' => 'Google Gemini',
             'openrouter' => 'OpenRouter',
             'deepseek' => 'DeepSeek',
@@ -689,6 +705,11 @@ class AiSettingsPage extends Page
                 'gpt-4o-mini',
                 'o1',
                 'o3-mini',
+            ],
+            'openai-compatible' => [
+                'gemini-3.8-flash-high',
+                'gemini-3.8-flash-medium',
+                'gemini-3.8-flash-low',
             ],
             'gemini' => [
                 'gemini-1.5-pro',
