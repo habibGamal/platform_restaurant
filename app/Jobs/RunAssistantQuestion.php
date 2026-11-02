@@ -62,6 +62,12 @@ class RunAssistantQuestion implements ShouldBeUnique, ShouldQueue
         } catch (Throwable $e) {
             report($e);
 
+            // The answer may already be logged as done (or error); a second terminal event would contradict it.
+            $log->flush($this->runId);
+            if ($log->isFinished($this->runId)) {
+                return;
+            }
+
             $log->append($this->runId, $this->userId, AssistantEvent::error('provider_error', self::FAILED_AR, $this->conversationId), $this->conversationId);
         } finally {
             $log->flush($this->runId);

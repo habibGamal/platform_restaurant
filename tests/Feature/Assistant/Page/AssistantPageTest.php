@@ -7,8 +7,10 @@ namespace Tests\Feature\Assistant\Page;
 use App\Domain\Assistant\AssistantEvent;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant as AssistantContract;
+use App\Domain\Assistant\RunLog;
 use App\Enums\OrganizationPlan;
 use App\Filament\App\Pages\Assistant as AssistantPage;
+use App\Jobs\RunAssistantQuestion;
 use App\Models\AiConversationMeta;
 use App\Models\Organization;
 use App\Models\User;
@@ -16,6 +18,7 @@ use Closure;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Ai\Models\ConversationMessage;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
@@ -353,8 +356,8 @@ class AssistantPageTest extends TestCase
             ->assertSee('48,210 ج.م بزيادة 12%.')
             ->assertSet('selectedConversationId', $convId);
 
-        $this->assertCount(1, $fakeAssistant->streamCalls);
-        $call = $fakeAssistant->streamCalls[0];
+        $this->assertCount(1, $fakeAssistant->startCalls);
+        $call = $fakeAssistant->startCalls[0];
         $this->assertEquals($this->allowedOwner->id, $call['user']->id);
         $this->assertEquals(Channel::Chat, $call['channel']);
         $this->assertNull($call['conversationId']);
@@ -435,7 +438,7 @@ class AssistantPageTest extends TestCase
             ->call('send', $runId)
             ->assertSuccessful();
 
-        $call = $fakeAssistant->streamCalls[0];
+        $call = $fakeAssistant->startCalls[0];
         $this->assertEquals($runId, $call['runId']);
     }
 
@@ -571,5 +574,262 @@ class AssistantPageTest extends TestCase
 
         $this->assertStringContainsString('<p class="aa-suggest"><strong>اقتراح:</strong>', $html);
         $this->assertStringContainsString('<div class="aa-table"><table>', $html);
+    }
+
+    /**
+     * @param  list<AssistantEvent>  $events
+     */
+    private function seedRun(string $runId, array $events, ?string $conversationId = null): void
+    {
+        $log = new RunLog;
+        foreach ($events as $event) {
+            $log->append($runId, $this->allowedOwner->id, $event, $conversationId);
+        }
+        $log->flush($runId);
+    }
+
+    private function ownedConversation(string $conversationId): void
+    {
+        AiConversationMeta::create([
+            'conversation_id' => $conversationId,
+            'organization_id' => $this->eligibleOrg->id,
+            'user_id' => $this->allowedOwner->id,
+            'channel' => Channel::Chat,
+            'title' => 'سجل العمل',
+            'pinned' => false,
+            'last_activity_at' => now(),
+        ]);
+    }
+
+    private function storedAnswer(string $conversationId, string $content): string
+    {
+        $id = (string) Str::uuid();
+        ConversationMessage::create([
+            'id' => $id,
+            'conversation_id' => $conversationId,
+            'participant_type' => User::class,
+            'participant_id' => $this->allowedOwner->id,
+            'agent' => 'RestaurantAnalyst',
+            'role' => 'assistant',
+            'content' => $content,
+            'attachments' => '[]',
+            'steps' => '[]',
+            'usage' => '[]',
+            'meta' => '[]',
+            'status' => 'completed',
+        ]);
+
+        return $id;
+    }
+
+    public function test_send_queues_the_run_and_keeps_polling_while_it_streams(): void
+    {
+        Queue::fake();
+        $this->actingAs($this->allowedOwner);
+        $runId = (string) Str::uuid();
+
+        $component = Livewire::test(AssistantPage::class)
+            ->set('prompt', 'راجع أداء الأصناف')
+            ->call('send', $runId)
+            ->assertSet('isStreaming', true)
+            ->assertSet('currentRunId', $runId)
+            ->assertSet('lastSeq', 0)
+            ->assertSeeHtml('wire:poll.1s="poll"');
+
+        Queue::assertPushed(RunAssistantQuestion::class, fn (RunAssistantQuestion $job): bool => $job->runId === $runId && $job->userId === $this->allowedOwner->id);
+        $this->assertNotNull($component->get('selectedConversationId'));
+    }
+
+    public function test_poll_builds_the_work_log_from_the_run_events(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $this->app->instance(AssistantContract::class, new FakeAssistant);
+        $runId = (string) Str::uuid();
+
+        $component = Livewire::test(AssistantPage::class)
+            ->set('prompt', 'ركز على أنهي أصناف؟')
+            ->call('send', $runId);
+
+        $this->seedRun($runId, [
+            AssistantEvent::plan('هسأل التسويق عن الأصناف'),
+            AssistantEvent::toolCall('marketing_specialist'),
+            AssistantEvent::agentStarted('marketing', 'التسويق'),
+            AssistantEvent::toolCall('product_performance'),
+            AssistantEvent::stepStarted('marketing', 'بحلل أداء الأصناف…'),
+        ]);
+
+        $component->call('poll')
+            ->assertSet('isStreaming', true)
+            ->assertSet('lastSeq', 5)
+            ->assertSee('هسأل التسويق عن الأصناف')
+            ->assertSee('بحلل أداء الأصناف…')
+            ->assertSeeHtml('wire:poll.1s="poll"');
+
+        $workLog = $component->get('workLog');
+        $this->assertSame('هسأل التسويق عن الأصناف', $workLog['plan']);
+        $this->assertCount(1, $workLog['agents']);
+        $this->assertSame('marketing', $workLog['agents'][0]['agent']);
+        $this->assertSame('التسويق', $workLog['agents'][0]['label']);
+        $this->assertSame('running', $workLog['agents'][0]['status']);
+        $this->assertSame('بحلل أداء الأصناف…', $workLog['agents'][0]['step']);
+        $this->assertSame([], $workLog['agents'][0]['findings']);
+
+        $this->seedRun($runId, [
+            AssistantEvent::toolResult('product_performance'),
+            AssistantEvent::stepFinished('marketing', 'صنفين بيكسبوا أكتر من غيرهم'),
+        ]);
+
+        $component->call('poll');
+
+        $agent = $component->get('workLog')['agents'][0];
+        $this->assertSame(['صنفين بيكسبوا أكتر من غيرهم'], $agent['findings']);
+        $this->assertNull($agent['step']);
+        $this->assertSame('running', $agent['status']);
+        $component->assertSee('صنفين بيكسبوا أكتر من غيرهم');
+    }
+
+    public function test_coordinator_steps_are_labelled_as_the_assistant(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $this->app->instance(AssistantContract::class, new FakeAssistant);
+        $runId = (string) Str::uuid();
+
+        $component = Livewire::test(AssistantPage::class)
+            ->set('prompt', 'سؤال')
+            ->call('send', $runId);
+
+        $this->seedRun($runId, [
+            AssistantEvent::toolCall('get_kpis'),
+            AssistantEvent::stepStarted('assistant', 'بحسب المؤشرات…'),
+            AssistantEvent::toolCall('finance_specialist'),
+            AssistantEvent::agentStarted('finance', ''),
+        ]);
+
+        $component->call('poll');
+
+        $this->assertSame(['المساعد', 'المالية'], array_column($component->get('workLog')['agents'], 'label'));
+    }
+
+    public function test_done_stops_polling_and_the_stored_answer_shows_a_collapsed_work_log(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $this->app->instance(AssistantContract::class, new FakeAssistant);
+        $conversationId = (string) Str::uuid();
+        $this->ownedConversation($conversationId);
+        $runId = (string) Str::uuid();
+
+        $component = Livewire::test(AssistantPage::class)
+            ->call('selectConversation', $conversationId)
+            ->set('prompt', 'سؤال')
+            ->call('send', $runId);
+
+        $this->seedRun($runId, [
+            AssistantEvent::toolCall('marketing_specialist'),
+            AssistantEvent::agentStarted('marketing', 'التسويق'),
+            AssistantEvent::stepStarted('marketing', 'بحلل أداء الأصناف…'),
+            AssistantEvent::stepFinished('marketing', 'صنفين بيكسبوا أكتر'),
+            AssistantEvent::agentFinished('marketing', false),
+            AssistantEvent::toolCall('finance_specialist'),
+            AssistantEvent::agentStarted('finance', 'المالية'),
+            AssistantEvent::stepStarted('finance', 'بحلل الربحية…'),
+            AssistantEvent::agentFinished('finance', true),
+            AssistantEvent::textDelta('ركز على الصنفين دول.'),
+        ], $conversationId);
+
+        $component->call('poll')
+            ->assertSet('isStreaming', true)
+            ->assertSee('استعان بـ: التسويق، المالية · 2 خطوات')
+            ->assertSee('ركز على الصنفين دول.');
+
+        $messageId = $this->storedAnswer($conversationId, 'ركز على الصنفين دول.');
+        $this->seedRun($runId, [AssistantEvent::done($conversationId, $messageId)], $conversationId);
+
+        $component->call('poll')
+            ->assertSet('isStreaming', false)
+            ->assertSet('streamedAnswer', null)
+            ->assertDontSeeHtml('wire:poll.1s')
+            ->assertSee('استعان بـ: التسويق، المالية · 2 خطوات');
+
+        $messages = $component->get('messages');
+        $this->assertIsArray($messages);
+        $stored = collect($messages)->firstWhere('id', $messageId);
+        $this->assertNotNull($stored);
+        $this->assertSame(['done', 'failed'], array_column($stored['workLog']['agents'], 'status'));
+        $this->assertSame(['صنفين بيكسبوا أكتر'], $stored['workLog']['agents'][0]['findings']);
+        $this->assertSame([], $component->get('workLog')['agents']);
+    }
+
+    public function test_an_error_discards_the_partial_answer(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $this->app->instance(AssistantContract::class, new FakeAssistant([
+            AssistantEvent::textDelta('get_kpis{"period":"x"}'),
+            AssistantEvent::error('provider_error', 'النموذج رجّع رد غير سليم.'),
+        ]));
+
+        Livewire::test(AssistantPage::class)
+            ->set('prompt', 'سؤال')
+            ->call('send', (string) Str::uuid())
+            ->assertSet('isStreaming', false)
+            ->assertSet('streamedAnswer', null)
+            ->assertSet('errorCode', 'provider_error')
+            ->assertSee('النموذج رجّع رد غير سليم.')
+            ->assertDontSee('get_kpis{');
+    }
+
+    public function test_reloading_the_page_resumes_an_unfinished_run(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $conversationId = (string) Str::uuid();
+        $this->ownedConversation($conversationId);
+
+        $this->seedRun((string) Str::uuid(), [AssistantEvent::textDelta('قديم'), AssistantEvent::done($conversationId)], $conversationId);
+
+        $runId = (string) Str::uuid();
+        $this->seedRun($runId, [
+            AssistantEvent::toolCall('marketing_specialist'),
+            AssistantEvent::agentStarted('marketing', 'التسويق'),
+            AssistantEvent::stepStarted('marketing', 'بحلل أداء الأصناف…'),
+        ], $conversationId);
+
+        $component = Livewire::test(AssistantPage::class, ['conversation' => $conversationId])
+            ->assertSet('isStreaming', true)
+            ->assertSet('currentRunId', $runId)
+            ->assertSet('lastSeq', 3)
+            ->assertSeeHtml('wire:poll.1s="poll"')
+            ->assertSee('بحلل أداء الأصناف…');
+
+        $this->assertSame('running', $component->get('workLog')['agents'][0]['status']);
+    }
+
+    public function test_reloading_does_not_resume_a_finished_run(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $conversationId = (string) Str::uuid();
+        $this->ownedConversation($conversationId);
+        $this->seedRun((string) Str::uuid(), [AssistantEvent::stepStarted('assistant', 'بحسب…'), AssistantEvent::done($conversationId)], $conversationId);
+
+        Livewire::test(AssistantPage::class, ['conversation' => $conversationId])
+            ->assertSet('isStreaming', false)
+            ->assertSet('currentRunId', null)
+            ->assertDontSeeHtml('wire:poll.1s');
+    }
+
+    public function test_the_stop_button_cancels_the_current_run(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $fakeAssistant = new FakeAssistant;
+        $this->app->instance(AssistantContract::class, $fakeAssistant);
+        $runId = (string) Str::uuid();
+
+        Livewire::test(AssistantPage::class)
+            ->set('prompt', 'سؤال')
+            ->call('send', $runId)
+            ->assertSeeHtml('aria-label="إيقاف الإجابة"')
+            ->call('stop')
+            ->assertSet('isStreaming', false)
+            ->assertDontSeeHtml('wire:poll.1s');
+
+        $this->assertSame([$runId], $fakeAssistant->cancelledRunIds);
     }
 }

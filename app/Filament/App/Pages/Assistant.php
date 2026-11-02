@@ -9,8 +9,10 @@ use App\Domain\Assistant\AssistantReadinessResult;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant as AssistantContract;
 use App\Domain\Assistant\ConversationGuard;
+use App\Domain\Assistant\RunLog;
 use App\Filament\App\Pages\Management\AiSettingsPage;
 use App\Models\AiConversationMeta;
+use App\Models\AiRunEvent;
 use App\Models\User;
 use BackedEnum;
 use DateTimeInterface;
@@ -23,10 +25,8 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Laravel\Ai\Models\ConversationMessage;
-use Livewire\Attributes\Async;
 use Livewire\Attributes\Isolate;
 use Livewire\Attributes\Locked;
-use Throwable;
 
 #[Isolate]
 class Assistant extends Page
@@ -65,17 +65,39 @@ class Assistant extends Page
 
     public ?string $streamedAnswer = null;
 
-    /**
-     * @var list<array{id: string, role: string, content: string, created_at: string, sources: list<string>}>
-     */
-    public array $messages = [];
+    /** The last run-log row read for the current run. */
+    #[Locked]
+    public int $lastSeq = 0;
 
     /**
-     * Source labels already streamed into the rail for the current run.
+     * What the agents of the current run are doing, rebuilt from its run log.
+     *
+     * @var array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}
+     */
+    #[Locked]
+    public array $workLog = ['plan' => null, 'agents' => []];
+
+    /**
+     * Source labels of the tools the current run called.
      *
      * @var list<string>
      */
-    protected array $streamedSources = [];
+    #[Locked]
+    public array $liveSources = [];
+
+    /**
+     * @var list<array{id: string, role: string, content: string, created_at: string, sources: list<string>, workLog: ?array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}}>
+     */
+    public array $messages = [];
+
+    /** The coordinator never sends its own label; specialists normally do (agent_started text). */
+    private const AGENT_LABELS = [
+        'assistant' => 'المساعد',
+        'marketing' => 'التسويق',
+        'finance' => 'المالية',
+        'operations' => 'التشغيل',
+        'data_checker' => 'مدقق البيانات',
+    ];
 
     public function getHeading(): string|Htmlable|null
     {
@@ -108,6 +130,7 @@ class Assistant extends Page
                 $guard->assertBelongsTo($conversation, $user);
                 $this->selectedConversationId = $conversation;
                 $this->loadMessages();
+                $this->resumeUnfinishedRun($user);
             }
         }
     }
@@ -169,14 +192,10 @@ class Assistant extends Page
         $this->selectedConversationId = $conversationId;
         $this->messages = [];
         $this->prompt = '';
-        $this->toolStatus = null;
-        $this->errorMessage = null;
-        $this->errorCode = null;
-        $this->streamedAnswer = null;
-        $this->currentRunId = null;
-        $this->isStreaming = false;
+        $this->resetRun();
 
         $this->loadMessages();
+        $this->resumeUnfinishedRun($user);
     }
 
     public function newConversation(): void
@@ -184,12 +203,7 @@ class Assistant extends Page
         $this->selectedConversationId = null;
         $this->messages = [];
         $this->prompt = '';
-        $this->toolStatus = null;
-        $this->errorMessage = null;
-        $this->errorCode = null;
-        $this->streamedAnswer = null;
-        $this->currentRunId = null;
-        $this->isStreaming = false;
+        $this->resetRun();
     }
 
     public function togglePin(string $conversationId): void
@@ -248,80 +262,56 @@ class Assistant extends Page
             'content' => $text,
             'created_at' => now()->format('H:i'),
             'sources' => [],
+            'workLog' => null,
         ];
 
+        $this->resetRun();
         $this->currentRunId = $runId;
-        $this->streamedSources = [];
         $this->isStreaming = true;
-        $this->toolStatus = null;
-        $this->errorMessage = null;
-        $this->errorCode = null;
         $this->streamedAnswer = '';
 
         /** @var AssistantContract $assistant */
         $assistant = app(AssistantContract::class);
 
-        try {
-            $events = $assistant->stream(
-                user: $user,
-                channel: Channel::Chat,
-                conversationId: $this->selectedConversationId,
-                text: $text,
-                runId: $this->currentRunId,
-            );
+        $conversationId = $assistant->start(
+            user: $user,
+            channel: Channel::Chat,
+            conversationId: $this->selectedConversationId,
+            text: $text,
+            runId: $runId,
+        );
 
-            foreach ($events as $event) {
-                if ($event->type === 'text_delta' && $event->text !== null) {
-                    $this->streamedAnswer .= $event->text;
-                    $this->stream(to: 'answer', content: e($event->text), replace: false);
-                } elseif ($event->type === 'tool_call' && $event->toolName !== null) {
-                    $this->toolStatus = $this->mapToolStatus($event->toolName);
-                    $this->stream(to: 'status', content: e($this->toolStatus), replace: true);
-
-                    $source = $this->sourceLabel($event->toolName);
-                    if (! in_array($source, $this->streamedSources, true)) {
-                        $this->streamedSources[] = $source;
-                        $this->stream(to: 'sources', content: '<span class="aa-ticket">'.e($source).'</span>', replace: false);
-                    }
-                } elseif ($event->type === 'tool_result') {
-                    $this->toolStatus = null;
-                    $this->stream(to: 'status', content: '', replace: true);
-                } elseif ($event->type === 'done') {
-                    if ($event->conversationId !== null) {
-                        $this->selectedConversationId = $event->conversationId;
-                    }
-                    $this->toolStatus = null;
-                    $this->isStreaming = false;
-                    $this->loadMessages();
-                } elseif ($event->type === 'error') {
-                    $this->errorMessage = $event->text ?? 'حدث خطأ أثناء معالجة الطلب.';
-                    $this->errorCode = $event->errorCode;
-                    if ($event->conversationId !== null) {
-                        $this->selectedConversationId = $event->conversationId;
-                    }
-                    $this->toolStatus = null;
-                    $this->isStreaming = false;
-                    $this->loadMessages();
-                }
-            }
-        } catch (Throwable $e) {
-            report($e);
-            $this->errorMessage = 'تعذر إكمال الإجابة. أعد إرسال السؤال بعد قليل.';
-            $this->errorCode = 'provider_error';
-            $this->toolStatus = null;
-            $this->isStreaming = false;
-        } finally {
-            $this->isStreaming = false;
-            $this->toolStatus = null;
+        if ($conversationId !== null) {
+            $this->selectedConversationId = $conversationId;
         }
 
-        // If loadMessages fetched the persisted assistant message with matching content, clear streamedAnswer.
-        if (! empty($this->messages) && end($this->messages)['role'] === 'assistant' && end($this->messages)['content'] === $this->streamedAnswer) {
-            $this->streamedAnswer = null;
+        // A gate failure is already in the log; show it now rather than on the first poll.
+        $this->poll();
+    }
+
+    /**
+     * Read the run-log rows written since the last poll. Wired to `wire:poll` only while a run streams.
+     */
+    public function poll(): void
+    {
+        if (! $this->isStreaming || $this->currentRunId === null) {
+            return;
+        }
+
+        /** @var User|null $user */
+        $user = auth()->user();
+        abort_unless($user instanceof User, 403);
+
+        foreach (app(RunLog::class)->since($this->currentRunId, $user->id, $this->lastSeq) as $row) {
+            $this->lastSeq = $row['seq'];
+            $this->applyRunEvent($row['type'], $row['payload']);
+
+            if (! $this->isStreaming) {
+                break;
+            }
         }
     }
 
-    #[Async]
     public function stop(?string $runId = null): void
     {
         $targetRunId = $runId ?? $this->currentRunId;
@@ -336,6 +326,202 @@ class Assistant extends Page
 
         $this->isStreaming = false;
         $this->toolStatus = null;
+        $this->workLog = $this->finishWorkLog($this->workLog, 'failed');
+    }
+
+    /**
+     * One-line summary of a finished work log, e.g. «استعان بـ: التسويق، المالية · 2 خطوات».
+     *
+     * @param  array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}  $log
+     */
+    public function workLogSummary(array $log): string
+    {
+        $specialists = array_values(array_filter($log['agents'], fn (array $agent): bool => $agent['agent'] !== 'assistant'));
+        $labels = array_column($specialists !== [] ? $specialists : $log['agents'], 'label');
+        $steps = array_sum(array_column($log['agents'], 'steps'));
+
+        return 'استعان بـ: '.implode('، ', $labels).' · '.($steps === 1 ? 'خطوة واحدة' : "{$steps} خطوات");
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    protected function applyRunEvent(string $type, array $payload): void
+    {
+        $text = is_string($payload['text'] ?? null) ? $payload['text'] : null;
+        $this->workLog = $this->reduceWorkLog($this->workLog, $type, $payload);
+
+        if ($type === 'text_delta' && $text !== null) {
+            $this->streamedAnswer .= $text;
+        } elseif ($type === 'tool_call' && is_string($payload['toolName'] ?? null)) {
+            $this->toolStatus = $this->mapToolStatus($payload['toolName']);
+            $source = $this->sourceLabel($payload['toolName']);
+            if (! in_array($source, $this->liveSources, true)) {
+                $this->liveSources[] = $source;
+            }
+        } elseif ($type === 'tool_result') {
+            $this->toolStatus = null;
+        } elseif ($type === 'done' || $type === 'error') {
+            if (is_string($payload['conversationId'] ?? null)) {
+                $this->selectedConversationId = $payload['conversationId'];
+            }
+            $this->isStreaming = false;
+            $this->toolStatus = null;
+
+            if ($type === 'error') {
+                // Text streamed before an error may be a half answer or a printed tool call: drop it.
+                $this->streamedAnswer = null;
+                $this->errorMessage = $text ?? 'حدث خطأ أثناء معالجة الطلب.';
+                $this->errorCode = is_string($payload['errorCode'] ?? null) ? $payload['errorCode'] : null;
+            }
+
+            $this->loadMessages();
+
+            if ($type === 'done' && $this->answerIsStored($payload['messageId'] ?? null)) {
+                $this->streamedAnswer = null;
+                $this->workLog = ['plan' => null, 'agents' => []];
+                $this->liveSources = [];
+            }
+        }
+    }
+
+    /**
+     * The work log after one more run event.
+     *
+     * @param  array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}  $log
+     * @param  array<string, mixed>  $payload
+     * @return array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}
+     */
+    protected function reduceWorkLog(array $log, string $type, array $payload): array
+    {
+        $text = is_string($payload['text'] ?? null) ? trim($payload['text']) : '';
+
+        if ($type === 'plan') {
+            $log['plan'] = $text !== '' ? $text : $log['plan'];
+
+            return $log;
+        }
+        if ($type === 'done' || $type === 'error') {
+            return $this->finishWorkLog($log, $type === 'done' ? 'done' : 'failed');
+        }
+
+        $agent = is_string($payload['agent'] ?? null) ? $payload['agent'] : null;
+        if ($agent === null || ! in_array($type, ['agent_started', 'step_started', 'step_finished', 'agent_finished'], true)) {
+            return $log;
+        }
+
+        $index = array_search($agent, array_column($log['agents'], 'agent'), true);
+        if ($index === false) {
+            $log['agents'][] = ['agent' => $agent, 'label' => self::AGENT_LABELS[$agent] ?? $agent, 'status' => 'running', 'step' => null, 'findings' => [], 'steps' => 0];
+            $index = array_key_last($log['agents']);
+        }
+        $row = $log['agents'][$index];
+
+        if ($type === 'agent_started') {
+            $row['status'] = 'running';
+            if ($agent !== 'assistant' && $text !== '') {
+                $row['label'] = $text;
+            }
+        } elseif ($type === 'step_started') {
+            $row['status'] = 'running';
+            $row['step'] = $text !== '' ? $text : null;
+            $row['steps']++;
+        } elseif ($type === 'step_finished') {
+            $row['step'] = null;
+            if ($text !== '') {
+                $row['findings'][] = $text;
+            }
+        } else {
+            $row['status'] = ($payload['failed'] ?? false) === true ? 'failed' : 'done';
+            $row['step'] = null;
+        }
+
+        $log['agents'][$index] = $row;
+
+        return $log;
+    }
+
+    /**
+     * Agents still marked running when the run ended get its final status.
+     *
+     * @param  array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}  $log
+     * @return array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}
+     */
+    protected function finishWorkLog(array $log, string $status): array
+    {
+        foreach ($log['agents'] as $i => $agent) {
+            if ($agent['status'] === 'running') {
+                $log['agents'][$i]['status'] = $status;
+                $log['agents'][$i]['step'] = null;
+            }
+        }
+
+        return $log;
+    }
+
+    /**
+     * The work log of a stored assistant message. Only called for messages of a conversation the user owns.
+     *
+     * @return array{plan: ?string, agents: list<array{agent: string, label: string, status: string, step: ?string, findings: list<string>, steps: int}>}
+     */
+    protected function workLogForMessage(string $messageId): array
+    {
+        $log = ['plan' => null, 'agents' => []];
+        foreach (app(RunLog::class)->forMessage($messageId) as $row) {
+            $log = $this->reduceWorkLog($log, $row['type'], $row['payload']);
+        }
+
+        return $log;
+    }
+
+    private function answerIsStored(mixed $messageId): bool
+    {
+        $last = end($this->messages);
+
+        if (is_string($messageId) && in_array($messageId, array_column($this->messages, 'id'), true)) {
+            return true;
+        }
+
+        return $last !== false && $last['role'] === 'assistant' && $last['content'] === $this->streamedAnswer;
+    }
+
+    /**
+     * After a reload, pick up the user's latest run in the selected conversation if it has not finished.
+     */
+    private function resumeUnfinishedRun(User $user): void
+    {
+        if ($this->selectedConversationId === null) {
+            return;
+        }
+
+        $runId = AiRunEvent::query()
+            ->where('conversation_id', $this->selectedConversationId)
+            ->where('user_id', $user->id)
+            ->latest('id')
+            ->value('run_id');
+
+        if (! is_string($runId) || app(RunLog::class)->isFinished($runId)) {
+            return;
+        }
+
+        $this->resetRun();
+        $this->currentRunId = $runId;
+        $this->isStreaming = true;
+        $this->streamedAnswer = '';
+        $this->poll();
+    }
+
+    private function resetRun(): void
+    {
+        $this->currentRunId = null;
+        $this->isStreaming = false;
+        $this->lastSeq = 0;
+        $this->workLog = ['plan' => null, 'agents' => []];
+        $this->liveSources = [];
+        $this->toolStatus = null;
+        $this->errorMessage = null;
+        $this->errorCode = null;
+        $this->streamedAnswer = null;
     }
 
     protected function loadMessages(): void
@@ -366,12 +552,15 @@ class Assistant extends Page
                 $createdAt = $msg->getAttribute('created_at');
                 $formattedTime = $createdAt instanceof DateTimeInterface ? $createdAt->format('H:i') : '';
 
+                $role = (string) $msg->getAttribute('role');
+
                 return [
                     'id' => (string) $msg->getKey(),
-                    'role' => (string) $msg->getAttribute('role'),
+                    'role' => $role,
                     'content' => (string) ($msg->getAttribute('content') ?? ''),
                     'created_at' => $formattedTime,
                     'sources' => $this->sourcesFromSteps($msg->getAttribute('steps')),
+                    'workLog' => $role === 'assistant' ? $this->workLogForMessage((string) $msg->getKey()) : null,
                 ];
             })->all());
         }

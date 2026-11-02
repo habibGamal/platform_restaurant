@@ -17,9 +17,11 @@ use App\Models\AiRunEvent;
 use App\Models\Organization;
 use App\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Ai\Responses\Data\ToolCall;
@@ -214,6 +216,30 @@ final class QueuedRunTest extends TestCase
         $this->assertSame(['error'], array_column($rows, 'type'));
         $this->assertSame('provider_error', $rows[0]['payload']['errorCode']);
         $this->assertStringNotContainsString('fax', (string) $rows[0]['payload']['text']);
+    }
+
+    public function test_an_exception_after_done_does_not_append_a_second_terminal_event(): void
+    {
+        $user = $this->user();
+        RestaurantAnalyst::fake(['تمت المراجعة.']);
+        $runId = (string) Str::uuid();
+
+        Queue::fake();
+        $conversationId = app(AssistantService::class)->start($user, Channel::Chat, null, 'راجع الأداء', $runId);
+        $this->assertIsString($conversationId);
+
+        // The stream's cleanup (touching the conversation) runs after `done` was yielded; make it throw.
+        DB::listen(function (QueryExecuted $query): void {
+            if (str_starts_with(strtolower($query->sql), 'update') && str_contains($query->sql, 'ai_conversations_meta')) {
+                throw new RuntimeException('cleanup failed');
+            }
+        });
+
+        (new RunAssistantQuestion($user->id, 'chat', $conversationId, 'راجع الأداء', $runId))->handle(app(AssistantService::class), new RunLog);
+
+        $types = $this->types($runId, $user->id);
+        $this->assertSame('done', end($types));
+        $this->assertNotContains('error', $types);
     }
 
     public function test_a_failed_job_logs_an_error_unless_the_run_already_finished(): void

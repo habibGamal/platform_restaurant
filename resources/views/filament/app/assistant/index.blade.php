@@ -225,6 +225,42 @@
         .aa-status { font-size: 0.75rem; color: var(--aa-soft); }
         .aa-live-sources { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; }
 
+        /* Work log: which specialists worked on the answer and what each found. */
+        .aa-log { display: flex; flex-direction: column; gap: 0.5rem; }
+        .aa-log [x-cloak] { display: none; }
+        .aa-log-toggle {
+            display: inline-flex; align-items: center; gap: 0.35rem; align-self: flex-start; padding: 0.2rem 0.6rem;
+            border: 1px solid var(--aa-line); border-radius: 9999px; background: var(--aa-surface);
+            font-size: 0.75rem; color: var(--aa-soft); transition: color 0.15s, border-color 0.15s;
+        }
+        .aa-log-toggle:hover { color: var(--aa-ink); border-color: var(--aa-faint); }
+        .aa-log-chev { transition: transform 0.15s; }
+        .aa-log-chev.is-open { transform: rotate(180deg); }
+        .aa-log-body {
+            display: flex; flex-direction: column; gap: 0.6rem; padding: 0.75rem 0.9rem;
+            border: 1px solid var(--aa-line); border-radius: 0.75rem; background: var(--aa-surface);
+        }
+        .aa-log-plan { margin: 0; font-size: 0.8125rem; line-height: 1.7; color: var(--aa-soft); }
+        .aa-log-agents { display: flex; flex-direction: column; gap: 0.55rem; margin: 0; padding: 0; list-style: none; }
+        .aa-log-agent { display: flex; align-items: flex-start; gap: 0.6rem; }
+        .aa-log-state {
+            display: grid; place-items: center; width: 1.25rem; height: 1.25rem; flex-shrink: 0; margin-top: 0.1rem;
+            border-radius: 9999px; font-size: 0.7rem; font-weight: 700; line-height: 1;
+        }
+        .aa-log-state.is-running { color: var(--aa-brand); background: var(--aa-brand-soft); }
+        .aa-log-state.is-done { color: var(--aa-brand); background: var(--aa-brand-soft); }
+        .aa-log-state.is-failed { color: var(--aa-danger); background: var(--aa-danger-soft); }
+        .aa-spin {
+            width: 0.7rem; height: 0.7rem; border-radius: 9999px;
+            border: 2px solid color-mix(in oklab, var(--aa-brand) 25%, transparent); border-top-color: var(--aa-brand);
+        }
+        .aa-log-main { flex: 1; min-width: 0; }
+        .aa-log-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+        .aa-log-label { font-size: 0.8125rem; font-weight: 600; color: var(--aa-ink); }
+        .aa-log-step { font-size: 0.75rem; color: var(--aa-soft); }
+        .aa-log-findings { margin: 0.3rem 0 0; padding-inline-start: 1rem; list-style: disc; font-size: 0.8125rem; line-height: 1.7; color: var(--aa-soft); }
+        .aa-log-findings li::marker { color: var(--aa-faint); }
+
         .aa-alert {
             display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem 1rem; font-size: 0.875rem;
             color: var(--aa-ink); background: var(--aa-danger-soft);
@@ -258,12 +294,15 @@
         .aa-send { color: #fff; background: var(--aa-brand); }
         .aa-send:disabled { opacity: 0.4; cursor: not-allowed; }
         .aa-stop { display: none; color: var(--aa-surface); background: var(--aa-ink); }
+        .aa-stop.is-on { display: grid; }
         .aa-send:hover:not(:disabled), .aa-stop:hover { opacity: 0.88; }
         .aa-stop-square { width: 0.75rem; height: 0.75rem; border-radius: 0.15rem; background: currentColor; }
         .aa-hint { max-width: 46rem; margin: 0.5rem auto 0; text-align: center; font-size: 0.75rem; color: var(--aa-faint); }
 
         @media (prefers-reduced-motion: no-preference) {
             .aa-dot { animation: aa-pulse 1.4s ease-in-out infinite; }
+            .aa-spin { animation: aa-spin 0.8s linear infinite; }
+            @keyframes aa-spin { to { transform: rotate(360deg); } }
             .aa-side { transition: transform 0.2s ease; }
             @keyframes aa-pulse { 50% { opacity: 0.3; } }
         }
@@ -303,7 +342,7 @@
             copiedId: null,
             submit() {
                 const text = ($wire.prompt || '').trim();
-                if (! text) return;
+                if (! text || $wire.isStreaming) return;
                 this.pendingQuestion = text;
                 this.runId = crypto.randomUUID();
                 $wire.send(this.runId);
@@ -315,7 +354,8 @@
                 $wire.useStarterPrompt(prompt, this.runId);
             },
             stop() {
-                if (this.runId) $wire.stop(this.runId);
+                // The server knows the current run, also one resumed after a reload.
+                $wire.stop();
             },
             resize() {
                 const el = this.$refs.composer;
@@ -460,6 +500,9 @@
                             </div>
                         @else
                             <article wire:key="msg-{{ $msg['id'] }}" class="aa-msg">
+                                @if (! empty($msg['workLog']))
+                                    @include('filament.app.assistant.work-log', ['log' => $msg['workLog'], 'collapsed' => true])
+                                @endif
                                 @if (! empty($msg['sources']))
                                     <div class="aa-sources">
                                         <span class="aa-sources-label">اعتمدت على</span>
@@ -480,25 +523,45 @@
                         @endif
                     @endforeach
 
-                    {{-- Answer received but not stored (e.g. stopped early): keep it on screen. --}}
-                    @if (filled($streamedAnswer))
-                        <article class="aa-msg">
-                            <div class="aa-answer">{!! $this->renderMarkdown($streamedAnswer) !!}</div>
+                    {{-- The current run, read from its log every second; also an answer that was never stored (e.g. stopped early). --}}
+                    @if ($isStreaming || filled($streamedAnswer) || ! empty($workLog['agents']) || filled($workLog['plan']))
+                        <article class="aa-msg" aria-live="polite" wire:key="live-{{ $currentRunId }}">
+                            @if ($isStreaming)
+                                <div wire:poll.1s="poll" wire:key="poll-{{ $currentRunId }}"></div>
+                            @endif
+
+                            <div wire:key="live-log-{{ filled($streamedAnswer) ? 'collapsed' : 'open' }}">
+                                @include('filament.app.assistant.work-log', ['log' => $workLog, 'collapsed' => filled($streamedAnswer)])
+                            </div>
+
+                            @if ($isStreaming)
+                                <div class="aa-live-row">
+                                    <span class="aa-dot"></span>
+                                    <span class="aa-status">{{ $toolStatus ?? (filled($streamedAnswer) ? 'بكتب الإجابة…' : 'بقرأ سؤالك…') }}</span>
+                                    <span class="aa-live-sources">
+                                        @foreach ($liveSources as $source)
+                                            <span class="aa-ticket">{{ $source }}</span>
+                                        @endforeach
+                                    </span>
+                                </div>
+                            @endif
+
+                            @if (filled($streamedAnswer))
+                                <div class="aa-answer">{!! $this->renderMarkdown($streamedAnswer) !!}</div>
+                            @endif
                         </article>
                     @endif
 
-                    {{-- Live run: the question, the sources being read, and the answer as it arrives. --}}
+                    {{-- While the question is being sent: show it before the server answers. --}}
                     <div class="aa-live-block" wire:loading.flex wire:target="send,useStarterPrompt">
                         <div class="aa-q-row">
                             <p class="aa-q aa-num" x-text="pendingQuestion"></p>
                         </div>
-                        <article class="aa-msg" aria-live="polite">
+                        <article class="aa-msg">
                             <div class="aa-live-row">
                                 <span class="aa-dot"></span>
-                                <span class="aa-status" wire:stream.replace="status">بقرأ سؤالك…</span>
-                                <span class="aa-live-sources" wire:stream="sources"></span>
+                                <span class="aa-status">بقرأ سؤالك…</span>
                             </div>
-                            <div class="aa-answer aa-stream" wire:stream="answer"></div>
                         </article>
                     </div>
 
@@ -531,18 +594,24 @@
                         x-on:keydown.enter="if (! $event.shiftKey && ! $event.isComposing) { $event.preventDefault(); submit(); }"
                         rows="1"
                         placeholder="{{ $notReady ? 'المساعد مش متاح لحد ما يتضبط' : 'اسأل عن فروعك…' }}"
-                        @disabled($notReady)
+                        @disabled($notReady || $isStreaming)
                         wire:loading.attr="disabled"
                         wire:target="send,useStarterPrompt"
                         class="aa-input aa-num"
                     ></textarea>
 
-                    <button type="submit" class="aa-send" wire:loading.remove wire:target="send,useStarterPrompt" @disabled($notReady) aria-label="إرسال">
-                        <x-filament::icon :icon="Heroicon::OutlinedArrowUp" class="aa-i" />
-                    </button>
-                    <button type="button" class="aa-stop" wire:loading.grid wire:target="send,useStarterPrompt" x-on:click="stop()" aria-label="إيقاف الإجابة" title="إيقاف">
-                        <span class="aa-stop-square"></span>
-                    </button>
+                    @if ($isStreaming)
+                        <button type="button" class="aa-stop is-on" x-on:click="stop()" aria-label="إيقاف الإجابة" title="إيقاف">
+                            <span class="aa-stop-square"></span>
+                        </button>
+                    @else
+                        <button type="submit" class="aa-send" wire:loading.remove wire:target="send,useStarterPrompt" @disabled($notReady) aria-label="إرسال">
+                            <x-filament::icon :icon="Heroicon::OutlinedArrowUp" class="aa-i" />
+                        </button>
+                        <button type="button" class="aa-stop" wire:loading.grid wire:target="send,useStarterPrompt" x-on:click="stop()" aria-label="إيقاف الإجابة" title="إيقاف">
+                            <span class="aa-stop-square"></span>
+                        </button>
+                    @endif
                 </form>
                 <p class="aa-hint">Enter للإرسال، وShift+Enter لسطر جديد. راجع الأرقام المهمة قبل ما تاخد قرار.</p>
             </div>
