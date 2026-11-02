@@ -115,6 +115,11 @@ class EvalRunnerTest extends TestCase
                 yield AssistantEvent::done('conv-stream');
             }
 
+            public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string
+            {
+                return $conversationId;
+            }
+
             public function cancel(string $runId): void {}
         };
 
@@ -200,6 +205,11 @@ class EvalRunnerTest extends TestCase
                 yield AssistantEvent::done('conv-stream');
             }
 
+            public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string
+            {
+                return $conversationId;
+            }
+
             public function cancel(string $runId): void {}
         };
 
@@ -245,6 +255,11 @@ class EvalRunnerTest extends TestCase
             {
                 yield AssistantEvent::textDelta('test');
                 yield AssistantEvent::done('conv-stream');
+            }
+
+            public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string
+            {
+                return $conversationId;
             }
 
             public function cancel(string $runId): void {}
@@ -300,6 +315,11 @@ class EvalRunnerTest extends TestCase
             {
                 yield AssistantEvent::textDelta('test');
                 yield AssistantEvent::done('conv-stream');
+            }
+
+            public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string
+            {
+                return $conversationId;
             }
 
             public function cancel(string $runId): void {}

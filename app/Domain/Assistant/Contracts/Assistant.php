@@ -27,6 +27,14 @@ interface Assistant
     public function stream(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): Generator;
 
     /**
+     * Run the gates now and answer in a queued job that writes its events to the RunLog.
+     *
+     * Returns the conversation id (started now when $conversationId is null). A gate failure is
+     * appended to the RunLog as an `error` event and nothing is queued.
+     */
+    public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string;
+
+    /**
      * Answer without streaming (WhatsApp, scheduled jobs).
      */
     public function ask(User $user, Channel $channel, ?string $conversationId, string $text): AssistantReply;

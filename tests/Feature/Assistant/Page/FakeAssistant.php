@@ -8,6 +8,7 @@ use App\Domain\Assistant\AssistantEvent;
 use App\Domain\Assistant\AssistantReply;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant;
+use App\Domain\Assistant\RunLog;
 use App\Models\User;
 use Generator;
 
@@ -17,6 +18,11 @@ final class FakeAssistant implements Assistant
      * @var list<array{user: User, channel: Channel, conversationId: ?string, text: string, runId: string}>
      */
     public array $streamCalls = [];
+
+    /**
+     * @var list<array{user: User, channel: Channel, conversationId: ?string, text: string, runId: string}>
+     */
+    public array $startCalls = [];
 
     /**
      * @var list<array{user: User, channel: Channel, conversationId: ?string, text: string}>
@@ -57,6 +63,28 @@ final class FakeAssistant implements Assistant
         foreach ($this->eventsToStream as $event) {
             yield $event;
         }
+    }
+
+    /**
+     * Records the call and writes the scripted events to the run log, as the queued job would.
+     */
+    public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string
+    {
+        $this->startCalls[] = [
+            'user' => $user,
+            'channel' => $channel,
+            'conversationId' => $conversationId,
+            'text' => $text,
+            'runId' => $runId,
+        ];
+
+        $log = new RunLog;
+        foreach ($this->eventsToStream as $event) {
+            $log->append($runId, $user->id, $event, $conversationId);
+        }
+        $log->flush($runId);
+
+        return $conversationId;
     }
 
     public function ask(User $user, Channel $channel, ?string $conversationId, string $text): AssistantReply

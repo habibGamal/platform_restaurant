@@ -8,6 +8,7 @@ use App\Ai\Agents\RestaurantAnalyst;
 use App\Domain\AiBilling\BudgetExceededException;
 use App\Domain\AiBilling\BudgetGuard;
 use App\Domain\Assistant\Contracts\Assistant;
+use App\Jobs\RunAssistantQuestion;
 use App\Models\AiConversationMeta;
 use App\Models\User;
 use Generator;
@@ -44,51 +45,47 @@ final class AssistantService implements Assistant
      */
     public function stream(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): Generator
     {
-        // Gate 1: AiAccess
-        if (! $this->aiAccess->allows($user)) {
-            $code = $this->aiAccess->denialReason($user) ?? 'forbidden';
-            $messageAr = $this->aiAccess->messageAr($code);
-            yield AssistantEvent::error('forbidden', $messageAr, $conversationId);
+        $gateError = $this->gateError($user, $conversationId);
+        if ($gateError !== null) {
+            yield $gateError;
 
             return;
         }
 
-        // Gate 2: BudgetGuard
-        try {
-            $this->budgetGuard->assertCanRun($user);
-        } catch (BudgetExceededException $e) {
-            yield AssistantEvent::error('budget_exceeded', $e->getMessage(), $conversationId);
+        $conversationId ??= $this->startConversation($user, $channel, $text);
 
-            return;
+        yield from $this->runStream($user, $channel, $conversationId, $text, $runId);
+    }
+
+    /**
+     * Run the gates now and answer in a queued job that writes every event to the run log.
+     *
+     * Returns the conversation id (started here when $conversationId is null) so the page can
+     * show the conversation before the job runs. A gate failure is logged and nothing is queued.
+     */
+    public function start(User $user, Channel $channel, ?string $conversationId, string $text, string $runId): ?string
+    {
+        $gateError = $this->gateError($user, $conversationId);
+        if ($gateError !== null) {
+            app(RunLog::class)->append($runId, $user->id, $gateError, $conversationId);
+
+            return $conversationId;
         }
 
-        // Gate 3: Per-user rate limit with Laravel RateLimiter
-        $maxMessages = (int) config('ai_billing.rate_limits.messages_per_minute_per_user', 20);
-        $rateLimitKey = "ai:rate_limit:user:{$user->id}";
-        if (RateLimiter::tooManyAttempts($rateLimitKey, $maxMessages)) {
-            yield AssistantEvent::error(
-                'rate_limited',
-                'تم تجاوز الحد المسموح به من الرسائل في الدقيقة. يرجى الانتظار قليلاً والمحاولة لاحقاً.',
-                $conversationId
-            );
+        $conversationId ??= $this->startConversation($user, $channel, $text);
 
-            return;
-        }
-        RateLimiter::hit($rateLimitKey, 60);
+        RunAssistantQuestion::dispatch($user->id, $channel->value, $conversationId, $text, $runId);
 
-        // Gate 4: Conversation ownership / registration
-        if ($conversationId !== null) {
-            try {
-                $this->conversationGuard->assertBelongsTo($conversationId, $user);
-            } catch (AuthorizationException) {
-                yield AssistantEvent::error('forbidden', 'ليس لديك صلاحية الوصول إلى هذه المحادثة.', $conversationId);
+        return $conversationId;
+    }
 
-                return;
-            }
-        } else {
-            $conversationId = $this->startConversation($user, $channel, $text);
-        }
-
+    /**
+     * Stream the agents' answer for a conversation that already passed the gates.
+     *
+     * @return Generator<int, AssistantEvent>
+     */
+    public function runStream(User $user, Channel $channel, string $conversationId, string $text, string $runId): Generator
+    {
         // Specialist events arrive while the coordinator runs a tool; they are mapped in order before its next event.
         $specialistEvents = [];
         $observer = function (string $specialist, StreamEvent $event) use (&$specialistEvents): void {
@@ -169,54 +166,16 @@ final class AssistantService implements Assistant
      */
     public function ask(User $user, Channel $channel, ?string $conversationId, string $text): AssistantReply
     {
-        // Gate 1: AiAccess
-        if (! $this->aiAccess->allows($user)) {
-            $code = $this->aiAccess->denialReason($user) ?? 'forbidden';
-
+        $gateError = $this->gateError($user, $conversationId);
+        if ($gateError !== null) {
             return new AssistantReply(
-                text: $this->aiAccess->messageAr($code),
+                text: (string) $gateError->text,
                 conversationId: $conversationId,
-                errorCode: 'forbidden',
+                errorCode: $gateError->errorCode,
             );
         }
 
-        // Gate 2: BudgetGuard
-        try {
-            $this->budgetGuard->assertCanRun($user);
-        } catch (BudgetExceededException $e) {
-            return new AssistantReply(
-                text: $e->getMessage(),
-                conversationId: $conversationId,
-                errorCode: 'budget_exceeded',
-            );
-        }
-
-        // Gate 3: Per-user rate limit with Laravel RateLimiter
-        $maxMessages = (int) config('ai_billing.rate_limits.messages_per_minute_per_user', 20);
-        $rateLimitKey = "ai:rate_limit:user:{$user->id}";
-        if (RateLimiter::tooManyAttempts($rateLimitKey, $maxMessages)) {
-            return new AssistantReply(
-                text: 'تم تجاوز الحد المسموح به من الرسائل في الدقيقة. يرجى الانتظار قليلاً والمحاولة لاحقاً.',
-                conversationId: $conversationId,
-                errorCode: 'rate_limited',
-            );
-        }
-        RateLimiter::hit($rateLimitKey, 60);
-
-        // Gate 4: Conversation ownership / registration
-        if ($conversationId !== null) {
-            try {
-                $this->conversationGuard->assertBelongsTo($conversationId, $user);
-            } catch (AuthorizationException) {
-                return new AssistantReply(
-                    text: 'ليس لديك صلاحية الوصول إلى هذه المحادثة.',
-                    conversationId: $conversationId,
-                    errorCode: 'forbidden',
-                );
-            }
-        } else {
-            $conversationId = $this->startConversation($user, $channel, $text);
-        }
+        $conversationId ??= $this->startConversation($user, $channel, $text);
 
         $agent = (new RestaurantAnalyst($user, $channel))->continue($conversationId, as: $user);
 
@@ -293,6 +252,47 @@ final class AssistantService implements Assistant
         }
 
         Cache::put("ai:cancel:{$userId}:{$runId}", true, 600);
+    }
+
+    /**
+     * Run the access, budget, rate-limit and conversation-ownership gates.
+     *
+     * Returns the error event to show when a gate refuses, or null when the question may run.
+     */
+    private function gateError(User $user, ?string $conversationId): ?AssistantEvent
+    {
+        if (! $this->aiAccess->allows($user)) {
+            $code = $this->aiAccess->denialReason($user) ?? 'forbidden';
+
+            return AssistantEvent::error('forbidden', $this->aiAccess->messageAr($code), $conversationId);
+        }
+
+        try {
+            $this->budgetGuard->assertCanRun($user);
+        } catch (BudgetExceededException $e) {
+            return AssistantEvent::error('budget_exceeded', $e->getMessage(), $conversationId);
+        }
+
+        $maxMessages = (int) config('ai_billing.rate_limits.messages_per_minute_per_user', 20);
+        $rateLimitKey = "ai:rate_limit:user:{$user->id}";
+        if (RateLimiter::tooManyAttempts($rateLimitKey, $maxMessages)) {
+            return AssistantEvent::error(
+                'rate_limited',
+                'تم تجاوز الحد المسموح به من الرسائل في الدقيقة. يرجى الانتظار قليلاً والمحاولة لاحقاً.',
+                $conversationId
+            );
+        }
+        RateLimiter::hit($rateLimitKey, 60);
+
+        if ($conversationId !== null) {
+            try {
+                $this->conversationGuard->assertBelongsTo($conversationId, $user);
+            } catch (AuthorizationException) {
+                return AssistantEvent::error('forbidden', 'ليس لديك صلاحية الوصول إلى هذه المحادثة.', $conversationId);
+            }
+        }
+
+        return null;
     }
 
     /**
