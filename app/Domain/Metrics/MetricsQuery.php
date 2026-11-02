@@ -148,8 +148,8 @@ final class MetricsQuery
      */
     public function scoped(string $table, ?Period $period = null): Builder
     {
-        if (! str_starts_with($table, 'agg_')) {
-            throw new InvalidArgumentException(sprintf("Table must start with 'agg_', got '%s'.", $table));
+        if (! str_starts_with($table, 'agg_') && $table !== 'wh_orders') {
+            throw new InvalidArgumentException(sprintf("Table must start with 'agg_' or be 'wh_orders', got '%s'.", $table));
         }
 
         $period = $period ?? $this->filters->period;

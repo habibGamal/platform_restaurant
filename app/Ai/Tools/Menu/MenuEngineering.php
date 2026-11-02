@@ -73,6 +73,9 @@ final class MenuEngineering implements ReportsProgress, Tool
             'per_branch' => ['sometimes', 'nullable', 'boolean'],
         ]));
         $filters = $this->reportFiltersFromArgs($args);
+        if ($filters->channel !== null) {
+            return $this->formatError('unsupported_filter', 'تحليل المنيو لا يدعم التصفية حسب قناة البيع.');
+        }
         $query = MetricsQuery::for($this->user, $filters);
         $branchIds = $query->branchIds();
         $organization = $this->user->organization;

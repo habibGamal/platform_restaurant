@@ -260,6 +260,16 @@ class MenuEngineeringTest extends TestCase
         $this->assertSame($result['metrics']['reason'], $result['summary']);
     }
 
+    public function test_tool_rejects_channel_filter_it_cannot_apply(): void
+    {
+        $tool = new MenuEngineering($this->fixture->owner);
+        $result = json_decode($tool->handle(new Request([
+            'preset' => 'custom', 'from' => MenuFixture::FROM, 'to' => MenuFixture::TO, 'channel' => 'delivery',
+        ])), true);
+
+        $this->assertSame('unsupported_filter', $result['error']);
+    }
+
     public function test_tool_rejects_a_manager_request_for_an_inaccessible_branch(): void
     {
         $tool = new MenuEngineering($this->fixture->managerA);

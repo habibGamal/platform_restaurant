@@ -7,6 +7,7 @@ namespace App\Domain\Menu;
 use App\Domain\Metrics\MetricsQuery;
 use App\Models\Organization;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 /**
  * Classic menu-engineering quadrants (popularity × unit contribution margin), computed separately for
@@ -37,6 +38,10 @@ final class MenuEngineeringAnalysis
      */
     public function run(MetricsQuery $query, Organization $organization, ?ItemRoleMap $roleMap = null): array
     {
+        if ($query->filters->channel !== null) {
+            throw new InvalidArgumentException('Menu engineering does not support filtering by channel.');
+        }
+
         $empty = ['new_items' => [], 'unknown_cost' => [], 'unclassified_count' => 0, 'floors' => []];
 
         $reason = $this->insufficientDataReason($query);
