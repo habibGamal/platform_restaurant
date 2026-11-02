@@ -21,7 +21,7 @@ use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Skills\Skill;
 
 #[MaxSteps(8)]
-#[Timeout(120)]
+#[Timeout(300)]
 #[MaxTokens(3000)]
 final class FinanceSpecialist extends SpecialistAgent
 {

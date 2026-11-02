@@ -262,6 +262,9 @@ final class CoordinatorTest extends TestCase
             "هراجع البيانات.\n<tool_call>{\"name\": \"get_kpis\"}</tool_call>",
             "هراجع البيانات.\n<tool_use name=\"get_kpis\">",
             "هراجع البيانات.\n{\"name\": \"marketing_specialist\", \"arguments\": {\"task\": \"راجع\"}}",
+            // DeepSeek-style markup, seen live when the proxy routed a request to a DeepSeek model.
+            "سأتحقق أولاً.\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"data_checker\">\n</｜DSML｜ invoke>\n</｜DSML｜ calls>",
+            "هراجع البيانات.\n<function_calls><invoke name=\"get_kpis\"></invoke></function_calls>",
         ];
 
         foreach ($printed as $text) {

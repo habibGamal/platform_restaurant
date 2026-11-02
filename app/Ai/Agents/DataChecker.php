@@ -11,7 +11,7 @@ use Laravel\Ai\Attributes\Timeout;
 use Laravel\Ai\Contracts\Tool;
 
 #[MaxSteps(8)]
-#[Timeout(120)]
+#[Timeout(300)]
 #[MaxTokens(3000)]
 final class DataChecker extends SpecialistAgent
 {

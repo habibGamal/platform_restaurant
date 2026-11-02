@@ -138,7 +138,7 @@ final class SpecialistsTest extends TestCase
             $this->assertSame($runId, (new ReflectionProperty(StopOnCancel::class, 'runId'))->getValue($middleware[2]));
             $this->assertSame(Channel::WhatsApp, (new ReflectionProperty(RecordUsage::class, 'channel'))->getValue($middleware[3]));
             $reflection = new ReflectionClass($agent);
-            foreach ([MaxSteps::class => 8, Timeout::class => 120, MaxTokens::class => 3000] as $attribute => $limit) {
+            foreach ([MaxSteps::class => 8, Timeout::class => 300, MaxTokens::class => 3000] as $attribute => $limit) {
                 $this->assertSame($limit, $reflection->getAttributes($attribute)[0]->newInstance()->value);
             }
         }

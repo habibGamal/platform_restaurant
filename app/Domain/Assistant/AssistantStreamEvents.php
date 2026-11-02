@@ -232,7 +232,9 @@ final class AssistantStreamEvents
 
     public static function containsPrintedToolCall(string $text): bool
     {
-        if (preg_match('/<\/?tool_(call|use)\b/i', $text) === 1) {
+        // OpenAI/Anthropic-style tags, Anthropic's legacy <function_calls>, and DeepSeek's ｜DSML｜ markup
+        // (seen when an OpenAI-compatible proxy routes a request to a DeepSeek model).
+        if (preg_match('/<\/?(tool_(call|use)|function_calls)\b|｜DSML｜/iu', $text) === 1) {
             return true;
         }
 
