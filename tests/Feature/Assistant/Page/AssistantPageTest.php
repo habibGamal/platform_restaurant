@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Assistant\Page;
 
 use App\Domain\Assistant\AssistantEvent;
+use App\Domain\Assistant\AssistantService;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant as AssistantContract;
 use App\Domain\Assistant\RunLog;
@@ -926,5 +927,31 @@ class AssistantPageTest extends TestCase
         $this->expectException(CannotUpdateLockedPropertyException::class);
 
         Livewire::test(AssistantPage::class)->set('runStartedAt', 0);
+    }
+
+    public function test_stored_answers_hide_plan_lines(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $conversationId = (string) Str::uuid();
+        $this->ownedConversation($conversationId);
+        $this->storedAnswer($conversationId, "خطة: هسأل المالية\nالربح ثابت الشهر ده.");
+
+        $component = Livewire::test(AssistantPage::class)->call('selectConversation', $conversationId);
+
+        $this->assertSame('الربح ثابت الشهر ده.', $component->get('messages')[0]['content']);
+        $component->assertDontSee('هسأل المالية')->assertSee('الربح ثابت الشهر ده.');
+    }
+
+    public function test_a_stored_answer_with_a_printed_tool_call_shows_the_retry_text(): void
+    {
+        $this->actingAs($this->allowedOwner);
+        $conversationId = (string) Str::uuid();
+        $this->ownedConversation($conversationId);
+        $this->storedAnswer($conversationId, "هجيب المؤشرات\n{\"name\":\"get_kpis\",\"arguments\":{}}");
+
+        $component = Livewire::test(AssistantPage::class)->call('selectConversation', $conversationId);
+
+        $this->assertSame(AssistantService::MALFORMED_REPLY_AR, $component->get('messages')[0]['content']);
+        $component->assertDontSee('get_kpis');
     }
 }

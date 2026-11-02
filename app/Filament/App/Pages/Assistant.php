@@ -7,6 +7,8 @@ namespace App\Filament\App\Pages;
 use App\Domain\Assistant\AssistantEvent;
 use App\Domain\Assistant\AssistantReadiness;
 use App\Domain\Assistant\AssistantReadinessResult;
+use App\Domain\Assistant\AssistantService;
+use App\Domain\Assistant\AssistantStreamEvents;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant as AssistantContract;
 use App\Domain\Assistant\ConversationGuard;
@@ -613,17 +615,29 @@ class Assistant extends Page
                 $formattedTime = $createdAt instanceof DateTimeInterface ? $createdAt->format('H:i') : '';
 
                 $role = (string) $msg->getAttribute('role');
+                $content = (string) ($msg->getAttribute('content') ?? '');
 
                 return [
                     'id' => (string) $msg->getKey(),
                     'role' => $role,
-                    'content' => (string) ($msg->getAttribute('content') ?? ''),
+                    'content' => $role === 'assistant' ? $this->storedAnswerText($content) : $content,
                     'created_at' => $formattedTime,
                     'sources' => $this->sourcesFromSteps($msg->getAttribute('steps')),
                     'workLog' => $role === 'assistant' ? $this->workLogForMessage((string) $msg->getKey()) : null,
                 ];
             })->all());
         }
+    }
+
+    /**
+     * A saved answer as it is shown: without its «خطة:» lines, and a reply in which the model printed
+     * a tool call (stored before the run ended in an error) replaced by the retry text.
+     */
+    private function storedAnswerText(string $content): string
+    {
+        return AssistantStreamEvents::containsPrintedToolCall($content)
+            ? AssistantService::MALFORMED_REPLY_AR
+            : AssistantStreamEvents::withoutPlanLines($content);
     }
 
     protected function mapToolStatus(string $toolName): string

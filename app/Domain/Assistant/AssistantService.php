@@ -30,7 +30,8 @@ use Throwable;
 
 final class AssistantService implements Assistant
 {
-    private const MALFORMED_REPLY_AR = 'النموذج رجّع رد غير سليم. أعد إرسال السؤال من فضلك.';
+    /** Shown instead of a reply in which the model printed a tool call rather than calling it. */
+    public const MALFORMED_REPLY_AR = 'النموذج رجّع رد غير سليم. أعد إرسال السؤال من فضلك.';
 
     public function __construct(
         private readonly AiAccess $aiAccess = new AiAccess,
