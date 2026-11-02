@@ -277,6 +277,7 @@ class ProcessIngestBatch implements ShouldQueue
         }
 
         $dirtyDates = [];
+        $catalogGrew = false;
 
         foreach ($envelope['documents'] as $index => $doc) {
             if (! is_array($doc) || ! isset($doc['uuid'])) {
@@ -345,6 +346,10 @@ class ProcessIngestBatch implements ShouldQueue
                     foreach ($result->dirtyDates as $date) {
                         $dirtyDates[(string) $date] = true;
                     }
+                }
+
+                if ($result->applied && $result->created && in_array($docType, ['product', 'category'], true)) {
+                    $catalogGrew = true;
                 }
             } catch (FencedWorkerException $e) {
                 // Stale worker fenced! Must abort immediately.
@@ -452,6 +457,15 @@ class ProcessIngestBatch implements ShouldQueue
 
         if (! $completed) {
             return;
+        }
+
+        if ($catalogGrew) {
+            // New menu items or categories need roles. One unique, delayed job per organization, however many batches add rows.
+            try {
+                ClassifyItemRoles::dispatch($branch->organization_id)->delay(now()->addMinutes(5));
+            } catch (Throwable $e) {
+                report($e);
+            }
         }
 
         $batchDatesWithGen = DB::table('ingest_dirty_dates')

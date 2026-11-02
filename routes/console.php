@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ClassifyItemRoles;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -9,3 +10,8 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('ingest:recover')->everyMinute()->withoutOverlapping();
+
+Schedule::call(fn () => ClassifyItemRoles::dispatchForEligibleOrganizations())
+    ->name('classify-item-roles')
+    ->dailyAt('04:00')
+    ->withoutOverlapping();

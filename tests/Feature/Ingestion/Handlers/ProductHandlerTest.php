@@ -55,6 +55,7 @@ class ProductHandlerTest extends TestCase
         $result = $this->handler->handle($this->branch, $document);
 
         $this->assertTrue($result->applied);
+        $this->assertTrue($result->created);
         $this->assertSame([], $result->dirtyDates);
 
         $product = DimProduct::where('uuid', $document['uuid'])->first();
@@ -92,6 +93,7 @@ class ProductHandlerTest extends TestCase
         ]);
 
         $this->assertTrue($resUpdate->applied);
+        $this->assertFalse($resUpdate->created);
         $product = DimProduct::where('uuid', $uuid)->first();
         $this->assertSame(2, $product->source_version);
         $this->assertSame('Double Burger', $product->name);

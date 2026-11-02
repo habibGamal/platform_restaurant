@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Assistant;
 
 use App\Enums\OrganizationPlan;
+use App\Models\Organization;
 use App\Models\User;
 use Throwable;
 
@@ -47,6 +48,23 @@ final class AiAccess
             return self::CODE_NO_PERMISSION;
         }
 
+        return $this->organizationDenialReason($organization);
+    }
+
+    /**
+     * Determine whether the organization itself is entitled to AI features (switch on, eligible plan),
+     * independent of any user. Used by system work such as background role classification.
+     */
+    public function allowsOrganization(Organization $organization): bool
+    {
+        return $this->organizationDenialReason($organization) === null;
+    }
+
+    /**
+     * Return the stable denial code if the organization is not entitled to AI features, or null if it is.
+     */
+    public function organizationDenialReason(Organization $organization): ?string
+    {
         if (! (bool) $organization->ai_enabled) {
             return self::CODE_AI_DISABLED;
         }

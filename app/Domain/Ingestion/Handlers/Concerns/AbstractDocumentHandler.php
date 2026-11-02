@@ -199,6 +199,6 @@ abstract class AbstractDocumentHandler implements DocumentHandler
 
         $this->replaceChildren($branch, $parent, $data, $document);
 
-        return HandleResult::applied($dirtyDates, $this->isDayClosed());
+        return HandleResult::applied($dirtyDates, $this->isDayClosed(), created: $existing === null);
     }
 }

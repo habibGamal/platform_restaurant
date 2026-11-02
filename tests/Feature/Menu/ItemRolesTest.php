@@ -70,6 +70,19 @@ class ItemRolesTest extends TestCase
         $this->assertSame(['K2'], $map->untrustedAmong(['K2']));
     }
 
+    public function test_only_owner_signal_and_auto_sources_can_be_trusted(): void
+    {
+        $org = Organization::factory()->create();
+        $this->assign($org->id, 'K5', 'main', 'import', 0.99);
+        $this->assign($org->id, 'K6', 'main', '', 1.00);
+        $this->assign($org->id, 'K7', 'main', 'owner', 1.00);
+
+        $map = app(ItemRoles::class)->mapFor($org->id);
+
+        $this->assertSame(['K5', 'K6'], $map->untrustedAmong(['K5', 'K6', 'K7']));
+        $this->assertSame(ItemRole::Main, $map->roleOf('K7'));
+    }
+
     public function test_unknown_key_is_untrusted(): void
     {
         $org = Organization::factory()->create();
