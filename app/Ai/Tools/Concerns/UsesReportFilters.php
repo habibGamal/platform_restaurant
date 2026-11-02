@@ -65,8 +65,8 @@ trait UsesReportFilters
     {
         return [
             'preset' => ['sometimes', 'nullable', 'string', Rule::enum(PeriodPreset::class)],
-            'from' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
-            'to' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'from' => ['nullable', 'required_if:preset,custom', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'required_if:preset,custom', 'date_format:Y-m-d', 'after_or_equal:from'],
             'compare' => ['sometimes', 'nullable', 'string', Rule::enum(ComparisonMode::class)],
             'branches' => ['sometimes', 'nullable', 'array'],
             'branches.*' => ['integer'],

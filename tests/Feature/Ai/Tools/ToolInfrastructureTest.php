@@ -15,6 +15,7 @@ use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\JsonSchema\JsonSchemaTypeFactory;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Validator;
 use Tests\Fixtures\TwoBranchesTwoWeeks;
 use Tests\TestCase;
 
@@ -80,6 +81,29 @@ class ToolInfrastructureTest extends TestCase
             public function __construct(public User $user) {}
         };
         $this->assertSame(config('app.timezone', 'Africa/Cairo'), $standaloneDummy->userTimezone());
+    }
+
+    public function test_shared_filter_rules_reject_missing_or_reversed_custom_dates(): void
+    {
+        $dummy = new class($this->fixture->owner)
+        {
+            use UsesReportFilters;
+
+            public function __construct(public User $user) {}
+        };
+
+        foreach ([
+            ['preset' => 'custom'],
+            ['preset' => 'custom', 'from' => '2026-10-03'],
+            ['preset' => 'custom', 'from' => null, 'to' => null],
+            ['preset' => 'custom', 'from' => '2026-10-16', 'to' => '2026-10-03'],
+        ] as $args) {
+            $this->assertTrue(Validator::make($args, $dummy->reportFilterRules())->fails());
+        }
+        $this->assertFalse(Validator::make(['preset' => 'today'], $dummy->reportFilterRules())->fails());
+        $this->assertFalse(Validator::make([
+            'preset' => 'custom', 'from' => '2026-10-03', 'to' => '2026-10-03',
+        ], $dummy->reportFilterRules())->fails());
     }
 
     public function test_caches_tool_results_deterministic_key(): void
