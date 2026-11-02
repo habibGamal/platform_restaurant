@@ -10,6 +10,7 @@ use App\Domain\Assistant\GroundingResult;
 use App\Domain\Assistant\NumericGroundingChecker;
 use Illuminate\Support\Facades\Event;
 use Laravel\Ai\Events\ToolInvoked;
+use Laravel\Ai\Tools\AgentTool;
 use Tests\Fixtures\TwoBranchesTwoWeeks;
 use Throwable;
 
@@ -127,7 +128,11 @@ class EvalRunner
                 : class_basename($event->tool);
 
             $capturedTools[] = $toolName;
-            $capturedResults[] = $event->result;
+            // A specialist's model-authored narrative is not numerical evidence.
+            // Its underlying tool invocations are captured independently by this listener.
+            if (! $event->tool instanceof AgentTool) {
+                $capturedResults[] = $event->result;
+            }
         };
 
         Event::listen(ToolInvoked::class, $listener);

@@ -22,13 +22,14 @@ use Laravel\Ai\Models\Conversation;
 use Laravel\Ai\Responses\Data\FinishReason;
 use Laravel\Ai\Streaming\Events\Error as SdkError;
 use Laravel\Ai\Streaming\Events\StreamEnd;
+use Laravel\Ai\Streaming\Events\StreamEvent;
 use Laravel\Ai\Streaming\Events\TextDelta;
-use Laravel\Ai\Streaming\Events\ToolCall as SdkToolCall;
-use Laravel\Ai\Streaming\Events\ToolResult as SdkToolResult;
 use Throwable;
 
 final class AssistantService implements Assistant
 {
+    private const MALFORMED_REPLY_AR = 'النموذج رجّع رد غير سليم. أعد إرسال السؤال من فضلك.';
+
     public function __construct(
         private readonly AiAccess $aiAccess = new AiAccess,
         private readonly BudgetGuard $budgetGuard = new BudgetGuard,
@@ -88,7 +89,13 @@ final class AssistantService implements Assistant
             $conversationId = $this->startConversation($user, $channel, $text);
         }
 
-        $agent = (new RestaurantAnalyst($user, $channel, $runId))->continue($conversationId, as: $user);
+        // Specialist events arrive while the coordinator runs a tool; they are mapped in order before its next event.
+        $specialistEvents = [];
+        $observer = function (string $specialist, StreamEvent $event) use (&$specialistEvents): void {
+            $specialistEvents[] = [$specialist, $event];
+        };
+        $agent = (new RestaurantAnalyst($user, $channel, $runId, $observer))->continue($conversationId, as: $user);
+        $mapping = new AssistantStreamEvents($agent->tools(), $channel);
 
         $lastMessageId = null;
         $endedWithError = false;
@@ -97,13 +104,23 @@ final class AssistantService implements Assistant
             $streamResponse = $agent->stream($text);
 
             foreach ($streamResponse as $event) {
+                // Yielded one by one: `yield from` an array reuses its keys and iterator_to_array() would drop events.
+                foreach ($specialistEvents as [$specialist, $specialistEvent]) {
+                    foreach ($mapping->map($specialistEvent, $specialist) as $mapped) {
+                        yield $mapped;
+                    }
+                }
+                $specialistEvents = [];
+                foreach ($mapping->map($event) as $mapped) {
+                    yield $mapped;
+                }
+
+                // Child terminal events must never end the coordinator's run.
+                if (! $mapping->isCoordinator($event)) {
+                    continue;
+                }
                 if ($event instanceof TextDelta) {
                     $lastMessageId = $event->messageId;
-                    yield AssistantEvent::textDelta($event->delta);
-                } elseif ($event instanceof SdkToolCall) {
-                    yield AssistantEvent::toolCall($event->toolCall->name);
-                } elseif ($event instanceof SdkToolResult) {
-                    yield AssistantEvent::toolResult($event->toolResult->name);
                 } elseif ($event instanceof StreamEnd) {
                     if ($event->reason === 'cancelled') {
                         $endedWithError = true;
@@ -123,7 +140,18 @@ final class AssistantService implements Assistant
             }
 
             if (! $endedWithError) {
-                yield AssistantEvent::done($conversationId, $lastMessageId);
+                foreach ($specialistEvents as [$specialist, $specialistEvent]) {
+                    foreach ($mapping->map($specialistEvent, $specialist) as $mapped) {
+                        yield $mapped;
+                    }
+                }
+                foreach ($mapping->flush() as $mapped) {
+                    yield $mapped;
+                }
+
+                yield $mapping->coordinatorPrintedToolCall()
+                    ? AssistantEvent::error('provider_error', self::MALFORMED_REPLY_AR, $conversationId)
+                    : AssistantEvent::done($conversationId, $streamResponse->assistantMessageId ?? $lastMessageId);
             }
         } catch (Throwable $e) {
             report($e);
@@ -221,8 +249,16 @@ final class AssistantService implements Assistant
                 );
             }
 
+            if (AssistantStreamEvents::containsPrintedToolCall($response->text)) {
+                return new AssistantReply(
+                    text: self::MALFORMED_REPLY_AR,
+                    conversationId: $conversationId,
+                    errorCode: 'provider_error',
+                );
+            }
+
             return new AssistantReply(
-                text: $response->text,
+                text: AssistantStreamEvents::withoutPlanLines($response->text),
                 conversationId: $conversationId,
                 messageId: $response->assistantMessageId,
                 toolsUsed: $toolsUsed,

@@ -238,7 +238,7 @@ final class MiddlewareAndExecutionTest extends TestCase
         $this->assertStringContainsString('Channel: chat', (string) $contextMessage->content);
     }
 
-    public function test_restaurant_analyst_instructions_are_static_with_arabic_and_english(): void
+    public function test_restaurant_analyst_instructions_are_static_coordinator_rules_in_arabic_and_english(): void
     {
         $user = $this->createEligibleUser();
         // Rule numbers may match a small auto-increment ID; use unique context sentinels.
@@ -251,20 +251,31 @@ final class MiddlewareAndExecutionTest extends TestCase
         $this->assertStringNotContainsString((string) $user->id, $instructions);
         $this->assertStringNotContainsString($user->name, $instructions);
 
-        // Contains 9 Arabic rules
-        $this->assertStringContainsString('الهوية والأسلوب', $instructions);
-        $this->assertStringContainsString('التأصيل الرقمي الصارم', $instructions);
-        $this->assertStringContainsString('التوضيح والافتراضات الذكية', $instructions);
-        $this->assertStringContainsString('الإفصاح عن السياق واكتمال البيانات', $instructions);
-        $this->assertStringContainsString('هيكل وشكل الإجابة', $instructions);
-        $this->assertStringContainsString('الالتزام بالصلاحيات', $instructions);
-        $this->assertStringContainsString('حماية البيانات والأمان', $instructions);
-        $this->assertStringContainsString('المهارات والمهام المركبة', $instructions);
-        $this->assertStringContainsString('ملاءمة قنوات التواصل', $instructions);
+        // Static text: identical for any user and channel, so the provider can cache it.
+        $other = new User(['name' => 'AnotherSentinel']);
+        $this->assertSame($instructions, (string) (new RestaurantAnalyst($other, Channel::WhatsApp, 'run'))->instructions());
 
-        // Contains English rules block
-        $this->assertStringContainsString('CORE SYSTEM RULES (EN):', $instructions);
-        $this->assertStringContainsString('GROUNDING:', $instructions);
+        // Coordinator sections in Arabic
+        $this->assertStringContainsString('التوجيه والتفويض', $instructions);
+        $this->assertStringContainsString('التأصيل والصلاحيات', $instructions);
+        $this->assertStringContainsString('شكل الإجابة', $instructions);
+        $this->assertStringContainsString('«خطة:»', $instructions);
+        $this->assertStringContainsString('«ركز على / متلمسش / كومبو مقترح / أفكار»', $instructions);
+        $this->assertStringContainsString('«اقتراح:»', $instructions);
+        $this->assertStringContainsString('واتساب', $instructions);
+        $this->assertStringContainsString('غير موثوقة', $instructions);
+
+        // Names only tools the coordinator actually has.
+        foreach (['marketing_specialist', 'finance_specialist', 'operations_specialist', 'data_checker', 'get_workspace_context'] as $tool) {
+            $this->assertStringContainsString($tool, $instructions);
+        }
+        foreach (['menu_engineering', 'combo_builder', 'playbook'] as $absent) {
+            $this->assertStringNotContainsStringIgnoringCase($absent, $instructions);
+        }
+
+        // English rules block
+        $this->assertStringContainsString('CORE RULES:', $instructions);
+        $this->assertStringContainsString('never model arithmetic', $instructions);
     }
 
     public function test_restaurant_analyst_provider_failover_chain(): void

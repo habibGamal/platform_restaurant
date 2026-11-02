@@ -24,6 +24,8 @@ final readonly class AssistantEvent
         public ?string $conversationId = null,
         public ?string $messageId = null,
         public ?string $errorCode = null,
+        public ?string $agent = null,
+        public ?bool $failed = null,
     ) {}
 
     public static function textDelta(string $text): self
@@ -39,6 +41,31 @@ final readonly class AssistantEvent
     public static function toolResult(string $toolName): self
     {
         return new self('tool_result', toolName: $toolName);
+    }
+
+    public static function plan(string $text): self
+    {
+        return new self('plan', text: $text);
+    }
+
+    public static function agentStarted(string $agent, string $labelAr): self
+    {
+        return new self('agent_started', text: $labelAr, agent: $agent);
+    }
+
+    public static function stepStarted(string $agent, string $labelAr): self
+    {
+        return new self('step_started', text: $labelAr, agent: $agent);
+    }
+
+    public static function stepFinished(string $agent, ?string $summaryAr): self
+    {
+        return new self('step_finished', text: $summaryAr, agent: $agent);
+    }
+
+    public static function agentFinished(string $agent, bool $failed): self
+    {
+        return new self('agent_finished', agent: $agent, failed: $failed);
     }
 
     public static function done(string $conversationId, ?string $messageId = null): self
