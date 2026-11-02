@@ -241,6 +241,8 @@ final class MiddlewareAndExecutionTest extends TestCase
     public function test_restaurant_analyst_instructions_are_static_with_arabic_and_english(): void
     {
         $user = $this->createEligibleUser();
+        // Rule numbers may match a small auto-increment ID; use unique context sentinels.
+        $user->forceFill(['id' => 987654321, 'name' => 'StaticPromptContextSentinel']);
         $agent = new RestaurantAnalyst($user, Channel::Chat);
 
         $instructions = (string) $agent->instructions();

@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\UsesOrganizationAiSettings;
 use App\Ai\Middleware\EnforceBudget;
 use App\Ai\Middleware\InjectRuntimeContext;
 use App\Ai\Middleware\RecordUsage;
 use App\Ai\Middleware\StopOnCancel;
-use App\Ai\ProviderOptions;
 use App\Ai\Tools\Context\FindBranches;
 use App\Ai\Tools\Context\GetWorkspaceContext;
 use App\Ai\Tools\Context\ResolvePeriod;
@@ -16,10 +16,7 @@ use App\Ai\Tools\Metrics\GetKpis;
 use App\Ai\Tools\Metrics\GetKpiSeries;
 use App\Ai\Tools\Metrics\QueryMetrics;
 use App\Domain\Assistant\Channel;
-use App\Models\AiSetting;
 use App\Models\User;
-use Illuminate\Support\Facades\Log;
-use Laravel\Ai\Ai;
 use Laravel\Ai\Attributes\CacheInstructions;
 use Laravel\Ai\Attributes\CacheToolDefinitions;
 use Laravel\Ai\Attributes\MaxSteps;
@@ -32,10 +29,8 @@ use Laravel\Ai\Contracts\Conversational;
 use Laravel\Ai\Contracts\HasMiddleware;
 use Laravel\Ai\Contracts\HasProviderOptions;
 use Laravel\Ai\Contracts\HasTools;
-use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Promptable;
 use Stringable;
-use Throwable;
 
 #[MaxSteps(12)]
 #[MaxTokens(4096)]
@@ -45,7 +40,7 @@ use Throwable;
 #[RepairToolCalls]
 class RestaurantAnalyst implements Agent, Conversational, HasMiddleware, HasProviderOptions, HasTools
 {
-    use Promptable, RemembersConversations;
+    use Promptable, RemembersConversations, UsesOrganizationAiSettings;
 
     public function __construct(
         public User $user,
@@ -132,95 +127,19 @@ INSTRUCTIONS;
     {
         return [
             new InjectRuntimeContext($this->user, $this->channel),
-            new EnforceBudget($this->user),
+            new EnforceBudget($this->user, runId: $this->runId),
             new StopOnCancel($this->user, $this->runId),
             new RecordUsage($this->user, $this->channel, fn (): ?string => $this->currentConversation()),
         ];
     }
 
-    /**
-     * Resolve provider selection with failover chain from organization ai_settings.
-     *
-     * @return Lab|array<string, string|null>|string
-     */
-    public function provider(): Lab|array|string
+    protected function aiOrganizationId(): ?int
     {
-        $orgId = $this->user->organization_id;
-        if ($orgId === null) {
-            return (string) config('ai.default', 'openai');
-        }
-
-        $setting = AiSetting::query()->where('organization_id', $orgId)->first();
-        if ($setting === null || empty($setting->provider)) {
-            return (string) config('ai.default', 'openai');
-        }
-
-        $primaryProvider = $setting->provider;
-        $primaryModel = $setting->model;
-
-        // BYO key handling via SDK on-demand provider building if supported
-        if (! empty($setting->byo_key)) {
-            /** @var array<string, mixed> $baseConfig */
-            $baseConfig = config("ai.providers.{$primaryProvider}", ['driver' => $primaryProvider]);
-            $onDemandName = "byo_{$primaryProvider}_{$orgId}";
-
-            try {
-                $built = Ai::build(array_merge($baseConfig, [
-                    'name' => $onDemandName,
-                    'key' => $setting->byo_key,
-                ]));
-                $primaryProvider = $built->name();
-            } catch (Throwable $e) {
-                // Falling back to the platform key means the platform pays for this organization's usage,
-                // so make it visible instead of failing over silently.
-                Log::warning('BYO AI key could not be applied; using the platform key.', [
-                    'organization_id' => $orgId,
-                    'provider' => $primaryProvider,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        $chain = [$primaryProvider => $primaryModel];
-
-        if (is_array($setting->failover)) {
-            foreach ($setting->failover as $item) {
-                if (! empty($item['provider'])) {
-                    $chain[$item['provider']] = $item['model'];
-                }
-            }
-        }
-
-        return $chain;
+        return $this->user->organization_id;
     }
 
-    /**
-     * Resolve model selection when provider is a string.
-     */
-    public function model(): ?string
+    protected function aiChannel(): ?Channel
     {
-        $orgId = $this->user->organization_id;
-        if ($orgId !== null) {
-            $setting = AiSetting::query()->where('organization_id', $orgId)->first();
-            if ($setting !== null && ! empty($setting->model)) {
-                return $setting->model;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Get provider-specific options for reasoning level and caching.
-     *
-     * @return array<string, mixed>
-     */
-    public function providerOptions(Lab|string $provider): array
-    {
-        $orgId = $this->user->organization_id;
-        $setting = $orgId !== null ? AiSetting::query()->where('organization_id', $orgId)->first() : null;
-        $reasoningLevel = $setting?->reasoning_level;
-
-        return ProviderOptions::for($provider, $reasoningLevel, $this->channel);
+        return $this->channel;
     }
 }

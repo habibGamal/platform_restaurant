@@ -46,4 +46,7 @@ return [
     |
     */
     'per_run_input_token_cap' => (int) env('AI_PER_RUN_INPUT_TOKEN_CAP', 120000),
+
+    // Shared input-token cap across the coordinator and all specialists for one question.
+    'per_question_input_token_cap' => (int) env('AI_PER_QUESTION_INPUT_TOKEN_CAP', 240000),
 ];

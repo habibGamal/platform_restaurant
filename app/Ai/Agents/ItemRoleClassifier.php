@@ -4,21 +4,18 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents;
 
+use App\Ai\Agents\Concerns\UsesOrganizationAiSettings;
 use App\Domain\Menu\ItemRole;
-use App\Models\AiSetting;
 use App\Models\Organization;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
-use Illuminate\Support\Facades\Log;
-use Laravel\Ai\Ai;
 use Laravel\Ai\Attributes\MaxTokens;
 use Laravel\Ai\Attributes\Timeout;
 use Laravel\Ai\Contracts\Agent;
+use Laravel\Ai\Contracts\HasProviderOptions;
 use Laravel\Ai\Contracts\HasStructuredOutput;
-use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Promptable;
 use Stringable;
-use Throwable;
 
 /**
  * Judges what role menu items (or whole categories) play, from behaviour figures and names.
@@ -26,9 +23,9 @@ use Throwable;
  */
 #[MaxTokens(8192)]
 #[Timeout(120)]
-class ItemRoleClassifier implements Agent, HasStructuredOutput
+class ItemRoleClassifier implements Agent, HasProviderOptions, HasStructuredOutput
 {
-    use Promptable;
+    use Promptable, UsesOrganizationAiSettings;
 
     /** Category-only answer: the category holds items with different roles. */
     public const MIXED = 'mixed';
@@ -75,57 +72,9 @@ INSTRUCTIONS;
         ];
     }
 
-    /**
-     * Provider chain from the organization's AI settings (same resolution as the analyst).
-     *
-     * @return Lab|array<string, string|null>|string
-     */
-    public function provider(): Lab|array|string
+    protected function aiOrganizationId(): ?int
     {
-        $setting = AiSetting::query()->where('organization_id', $this->organization->id)->first();
-        if ($setting === null || empty($setting->provider)) {
-            return (string) config('ai.default', 'openai');
-        }
-
-        $primaryProvider = $setting->provider;
-
-        if (! empty($setting->byo_key)) {
-            /** @var array<string, mixed> $baseConfig */
-            $baseConfig = config("ai.providers.{$primaryProvider}", ['driver' => $primaryProvider]);
-
-            try {
-                $built = Ai::build(array_merge($baseConfig, [
-                    'name' => "byo_{$primaryProvider}_{$this->organization->id}",
-                    'key' => $setting->byo_key,
-                ]));
-                $primaryProvider = $built->name();
-            } catch (Throwable $e) {
-                Log::warning('BYO AI key could not be applied; using the platform key.', [
-                    'organization_id' => $this->organization->id,
-                    'provider' => $primaryProvider,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        $chain = [$primaryProvider => $setting->model];
-
-        if (is_array($setting->failover)) {
-            foreach ($setting->failover as $item) {
-                if (! empty($item['provider'])) {
-                    $chain[$item['provider']] = $item['model'];
-                }
-            }
-        }
-
-        return $chain;
-    }
-
-    public function model(): ?string
-    {
-        $setting = AiSetting::query()->where('organization_id', $this->organization->id)->first();
-
-        return $setting !== null && ! empty($setting->model) ? $setting->model : null;
+        return $this->organization->id;
     }
 
     /** @return list<string> */
