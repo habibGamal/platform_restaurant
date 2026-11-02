@@ -144,16 +144,16 @@ return [
         ],
 
         'openai' => [
-            // Proxies like miraiapi only speak Chat Completions reliably; their Responses API
-            // streams end without `response.completed`. Use `openai` for api.openai.com.
-            'driver' => env('OPENAI_DRIVER', 'openai-compatible'),
+            // `openai` (Responses API) for api.openai.com. Set OPENAI_DRIVER=openai-compatible
+            // (Chat Completions) for proxies whose Responses API streams end without `response.completed`.
+            'driver' => env('OPENAI_DRIVER', 'openai'),
             'key' => env('OPENAI_API_KEY'),
-            'url' => env('OPENAI_URL', 'https://api.miraiapi.com/v1'),
+            'url' => env('OPENAI_URL', 'https://api.openai.com/v1'),
             'store' => env('OPENAI_STORE', true),
             // false: fetch each step whole instead of streaming (a workaround for proxies that drop
-            // streamed tool calls). Live runs on miraiapi were worse without streaming, so it stays on.
+            // streamed tool calls). Live runs on a proxy were worse without streaming, so it stays on.
             'stream' => (bool) env('OPENAI_STREAM', true),
-            // Required by the openai-compatible driver, which has no built-in defaults.
+            // Required when OPENAI_DRIVER=openai-compatible, which has no built-in defaults.
             'models' => [
                 'text' => [
                     'default' => env('OPENAI_MODEL', 'gpt-6.1-sol'),
