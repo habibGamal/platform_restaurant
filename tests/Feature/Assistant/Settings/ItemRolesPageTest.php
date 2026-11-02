@@ -199,4 +199,21 @@ class ItemRolesPageTest extends TestCase
         Livewire::test(AiSettingsPage::class)
             ->assertActionExists('item_roles', fn ($action) => $action->getUrl() === ItemRolesPage::getUrl());
     }
+
+    public function test_unknown_source_and_invalid_role_rows_are_shown_as_untrusted(): void
+    {
+        $branch = Branch::factory()->create(['organization_id' => $this->org->id]);
+        $this->product($branch, 'ECHO', 'Echo Dish', 'Cat One');
+        $this->product($branch, 'FOXTROT', 'Foxtrot Dish', 'Cat One');
+        $this->assignment($this->org, 'ECHO', 'main', 'import', 0.95);
+        $this->assignment($this->org, 'FOXTROT', 'chef', 'auto', 0.95);
+
+        $this->actingAs($this->owner);
+
+        $keys = Livewire::test(ItemRolesPage::class)->instance()->getTableRecords()->keys()->all();
+
+        // The assistant ignores both rows, so they must sort with the untrusted ones, before every trusted row.
+        $this->assertEqualsCanonicalizing(['DELTA', 'BETA', 'ECHO', 'FOXTROT'], array_slice(array_map('strval', $keys), 0, 4));
+        $this->assertSame(['GAMMA', 'ALPHA'], array_slice(array_map('strval', $keys), 4));
+    }
 }

@@ -15,8 +15,6 @@ final class ItemRoles
 
     public function mapFor(int $organizationId): ItemRoleMap
     {
-        $threshold = (float) config('ai.roles.trusted_confidence', 0.70);
-
         $trusted = [];
         $rows = ItemRoleAssignment::query()
             ->where('organization_id', $organizationId)
@@ -24,16 +22,24 @@ final class ItemRoles
 
         foreach ($rows as $row) {
             $role = ItemRole::tryFrom($row->role);
-            if ($role === null) {
-                continue;
-            }
-            if ($row->source === 'owner'
-                || (in_array($row->source, self::TRUSTED_SOURCES, true) && (float) $row->confidence >= $threshold)) {
+            if ($role !== null && self::isTrustedRow($row->source, (float) $row->confidence, $row->role)) {
                 $trusted[$row->item_key] = $role;
             }
         }
 
         return new ItemRoleMap($trusted);
+    }
+
+    /** The single trust rule: a valid role that the owner set, or that a signal/auto source assigned at or above the threshold. */
+    public static function isTrustedRow(string $source, float $confidence, ?string $role): bool
+    {
+        if ($role === null || ItemRole::tryFrom($role) === null) {
+            return false;
+        }
+
+        return $source === 'owner'
+            || (in_array($source, self::TRUSTED_SOURCES, true)
+                && $confidence >= (float) config('ai.roles.trusted_confidence', 0.70));
     }
 
     public function setOwnerRole(int $organizationId, string $itemKey, ItemRole $role): void

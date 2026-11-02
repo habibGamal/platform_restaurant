@@ -120,4 +120,30 @@ class ItemRolesTest extends TestCase
         $this->assertSame('hot drinks', ItemKey::normalizeCategory("  Hot \t DRINKS \n"));
         $this->assertSame('COALESCE(product_ref, product_uuid)', ItemKey::SQL);
     }
+
+    public function test_is_trusted_row_rule(): void
+    {
+        config(['ai.roles.trusted_confidence' => 0.70]);
+
+        $this->assertTrue(ItemRoles::isTrustedRow('owner', 0.10, 'main'));
+        $this->assertTrue(ItemRoles::isTrustedRow('auto', 0.70, 'side'));
+        $this->assertTrue(ItemRoles::isTrustedRow('signal', 0.95, 'drink'));
+        $this->assertFalse(ItemRoles::isTrustedRow('auto', 0.69, 'side'));
+        $this->assertFalse(ItemRoles::isTrustedRow('signal', 0.00, 'side'));
+        $this->assertFalse(ItemRoles::isTrustedRow('import', 0.95, 'main'));
+        $this->assertFalse(ItemRoles::isTrustedRow('owner', 1.00, 'chef'));
+        $this->assertFalse(ItemRoles::isTrustedRow('owner', 1.00, null));
+    }
+
+    public function test_map_for_excludes_unknown_source_and_invalid_role(): void
+    {
+        $org = Organization::factory()->create();
+        $this->assign($org->id, 'K1', 'main', 'import', 0.95);
+        $this->assign($org->id, 'K2', 'chef', 'auto', 0.95);
+        $this->assign($org->id, 'K3', 'main', 'auto', 0.95);
+
+        $map = app(ItemRoles::class)->mapFor($org->id);
+
+        $this->assertSame(['K1', 'K2'], $map->untrustedAmong(['K1', 'K2', 'K3']));
+    }
 }

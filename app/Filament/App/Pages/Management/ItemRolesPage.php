@@ -170,7 +170,6 @@ class ItemRolesPage extends Page implements HasTable
     private function items(): array
     {
         $orgId = $this->organizationId();
-        $threshold = (float) config('ai.roles.trusted_confidence', 0.70);
 
         $assignments = ItemRoleAssignment::query()
             ->where('organization_id', $orgId)
@@ -191,7 +190,7 @@ class ItemRolesPage extends Page implements HasTable
             $key = (string) ($product->product_ref ?? $product->uuid);
             $assignment = $assignments->get($key);
             $trusted = $assignment !== null
-                && ($assignment->source === 'owner' || (float) $assignment->confidence >= $threshold);
+                && ItemRoles::isTrustedRow($assignment->source, (float) $assignment->confidence, $assignment->role);
 
             // The latest product row names the item.
             $items[$key] = [
