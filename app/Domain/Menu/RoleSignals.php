@@ -79,6 +79,7 @@ final class RoleSignals
             ];
         }
 
+        // A null product type (not mirrored from the POS) counts as manufactured for the median.
         $median = $this->median(array_values(array_map(
             fn (array $i): float => $i['avgPrice'],
             array_filter($items, fn (array $i): bool => $i['type'] === null || $i['type'] === 'manufactured'),

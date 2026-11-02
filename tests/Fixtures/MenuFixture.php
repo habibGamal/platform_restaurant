@@ -30,24 +30,24 @@ use Illuminate\Support\Str;
  * ref          | name        | category    | type         | role intent                    | price | cost | units/day (both branches)
  * -------------|-------------|-------------|--------------|--------------------------------|-------|------|---------------------------
  * ZORBA-PLATE  | Zorba Plate | Mains       | manufactured | main: high margin, low volume  | 200   | 60   | 5.3   (70% margin)
- * KELTO-WRAP   | Kelto Wrap  | Mains       | manufactured | main: high margin, high volume | 80    | 24   | 22.4  (70% margin)
+ * KELTO-WRAP   | Kelto Wrap  | Mains       | manufactured | main: high margin, high volume | 100   | 28   | 22.4  (72% margin)
  * BRIMO-BOX    | Brimo Box   | Mains       | manufactured | main: low margin, high volume  | 60    | 48   | 22.4  (20% margin)
  * NADD-BOWL    | Nadd Bowl   | Mains       | manufactured | main: low margin, low volume   | 50    | 40   | 4.2   (20% margin)
  * FETA-TOWER   | Feta Tower  | Mains       | manufactured | main: new, on sale 2026-10-12  | 120   | 50   | ~4.2 on its 5 days (21 total)
  *              |             |             |              | .. 2026-10-16 only             |       |      |
  * QUILL-STEW   | Quill Stew  | Mains       | manufactured | main: cost unknown (0)         | 90    | 0    | 4.2
- * LUMO-RICE    | Lumo Rice   | Sides       | manufactured | side                           | 25    | 8    | 11.7
- * PEXA-SALAD   | Pexa Salad  | Sides       | manufactured | side                           | 30    | 10   | 3.4
+ * LUMO-RICE    | Lumo Rice   | Sides       | manufactured | side                           | 25    | 8    | 3.2   (Zorba-only)
+ * PEXA-SALAD   | Pexa Salad  | Sides       | manufactured | side                           | 30    | 10   | 14.7  (broad companion)
  * VIRA-SODA    | Vira Soda   | Drinks      | manufactured | drink, also sold alone         | 15    | 4    | 22.2
  * TINY-SPRING  | Tiny Spring | Drinks      | manufactured | drink: very high volume, never | 5     | 1    | 88.8  (highest quantity)
  *              |             |             |              | alone (attach rate 1.0)        |       |      |
- * GLAZE-DIP    | Glaze Dip   | Extras      | manufactured | add-on                         | 8     | 2    | 6.1
+ * GLAZE-DIP    | Glaze Dip   | Extras      | manufactured | add-on                         | 8     | 2    | 7.5
  * DIFF-LINE    | Diff Line   | Adjustments | manufactured | adjustment: always attached    | 1     | 0    | 4.1
  * BULK-FLOUR   | Bulk Flour  | Raw         | raw_material | raw                            | 30    | 20   | 1.1   (44 of 60 days)
  *
- * Totals: 3845 completed orders, 8327 order lines (12 of them in cancelled orders) over the 60 days.
- * Period sales: Kelto 107,440; Brimo 80,580; Zorba 63,800; Tiny Spring 26,640; Quill 22,500;
- * Vira 19,950; Lumo 17,600; Nadd 12,500; Pexa 6,030; Glaze 2,944; Feta 2,520; Bulk Flour 1,890; Diff 248.
+ * Totals: 3845 completed orders, 8581 order lines (12 of them in cancelled orders) over the 60 days.
+ * Period sales: Kelto 134,300; Brimo 80,580; Zorba 63,800; Pexa 26,490; Tiny Spring 26,640; Quill 22,500;
+ * Vira 19,950; Nadd 12,500; Lumo 4,800; Glaze 3,616; Feta 2,520; Bulk Flour 1,890; Diff 248.
  *
  * Median price of the manufactured items is 40, so Zorba priceVsMedian = 5.0 and Diff Line's
  * adjustment price ceiling is max(1, 0.02 * 40) = 1.
@@ -55,6 +55,12 @@ use Illuminate\Support\Str;
  * Other facts the tests rely on:
  *  - Zorba Plate shares an order with Lumo Rice in 60% of its orders (counter % 5 < 3); ~20% of
  *    Zorba orders contain only Zorba, so its attach rate is ~0.8 (< 0.9).
+ *  - Lumo Rice is only ever attached to Zorba Plate; Pexa Salad is a broad companion of Kelto, Brimo,
+ *    Nadd, Quill, Feta and Zorba. So among main -> side/drink pairs, Zorba -> Lumo has lift ~12
+ *    (192 orders) against a runner-up of ~2.3 (Feta -> Pexa), and Kelto/Brimo -> Tiny Spring have
+ *    the most orders (807 each, lift ~1.2). Menu engineering over the four eligible mains (Feta has
+ *    5 days on sale, Quill cost 0): Zorba hidden gem, Kelto star, Brimo workhorse, Nadd weak;
+ *    unit margins 140 / 72 / 12 / 10 against an average of ~49.
  *  - Weekday factors (0 = Saturday .. 6 = Friday, percent of base): 110, 90, 90, 95, 100, 115, 130.
  *  - Each branch has a cancelled order every 10th day holding a lone DIFF-LINE (must be ignored).
  *  - Order hours peak around 13-14h and 20-21h; order types cycle dine_in / takeaway / delivery.
@@ -72,7 +78,7 @@ class MenuFixture
     /** @var array<string, array{0: string, 1: string, 2: string, 3: float, 4: float}> ref => [name, category slug, type, price, cost] */
     private const PRODUCTS = [
         'ZORBA-PLATE' => ['Zorba Plate', 'mains', 'manufactured', 200.00, 60.00],
-        'KELTO-WRAP' => ['Kelto Wrap', 'mains', 'manufactured', 80.00, 24.00],
+        'KELTO-WRAP' => ['Kelto Wrap', 'mains', 'manufactured', 100.00, 28.00],
         'BRIMO-BOX' => ['Brimo Box', 'mains', 'manufactured', 60.00, 48.00],
         'NADD-BOWL' => ['Nadd Bowl', 'mains', 'manufactured', 50.00, 40.00],
         'FETA-TOWER' => ['Feta Tower', 'mains', 'manufactured', 120.00, 50.00],
@@ -528,8 +534,8 @@ class MenuFixture
                 if ($i % 5 < 3) {
                     $add('TINY-SPRING', 3);
                 }
-                if ($i % 7 === 0) {
-                    $add('LUMO-RICE');
+                if ($i % 4 === 1) {
+                    $add('PEXA-SALAD');
                 }
                 if ($i % 3 === 0) {
                     $add('VIRA-SODA');
@@ -545,8 +551,8 @@ class MenuFixture
                 if ($i % 5 < 3) {
                     $add('TINY-SPRING', 3);
                 }
-                if ($i % 6 === 0) {
-                    $add('LUMO-RICE');
+                if ($i % 4 === 2) {
+                    $add('PEXA-SALAD');
                 }
                 if ($i % 3 === 1) {
                     $add('VIRA-SODA');
@@ -568,7 +574,7 @@ class MenuFixture
                 break;
             case 'FETA-TOWER':
                 if ($i % 2 === 0) {
-                    $add('LUMO-RICE');
+                    $add('PEXA-SALAD');
                 }
                 if ($i % 3 === 0) {
                     $add('VIRA-SODA');
@@ -577,7 +583,7 @@ class MenuFixture
                 break;
             case 'QUILL-STEW':
                 if ($i % 3 === 0) {
-                    $add('LUMO-RICE');
+                    $add('GLAZE-DIP');
                 } elseif ($i % 3 === 1) {
                     $add('PEXA-SALAD');
                 }
