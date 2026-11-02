@@ -93,7 +93,8 @@ final class MenuEngineering implements ReportsProgress, Tool
             foreach ($branchIds as $id) {
                 $branchFilters = new ReportFilters($filters->preset, $filters->period, $filters->comparisonMode, $filters->comparison, [$id], $filters->branchSetId, $filters->restaurantId, $filters->likeForLike, $filters->channel, $filters->granularity);
                 $branchQuery = MetricsQuery::for($this->user, $branchFilters);
-                $result['by_branch'][$id] = $this->limitResult($analysis->run($branchQuery, $organization), is_string($role) ? $role : null);
+                // Per-branch views only confirm whether the overall priorities hold locally, so they stay compact.
+                $result['by_branch'][$id] = $this->limitResult($analysis->run($branchQuery, $organization), is_string($role) ? $role : null, perGroup: 3, compact: true);
             }
         }
 
@@ -126,7 +127,7 @@ final class MenuEngineering implements ReportsProgress, Tool
      * @param  array<string, mixed>  $result
      * @return array<string, mixed>
      */
-    private function limitResult(array $result, ?string $role): array
+    private function limitResult(array $result, ?string $role, int $perGroup = 8, bool $compact = false): array
     {
         if (! isset($result['groups'])) {
             return $result;
@@ -140,11 +141,26 @@ final class MenuEngineering implements ReportsProgress, Tool
         }
         foreach ($result['groups'] as &$quadrants) {
             foreach ($quadrants as &$items) {
-                $items = array_slice($items, 0, 8);
+                $items = array_slice($items, 0, $perGroup);
+                if ($compact) {
+                    $items = array_map(fn (array $row): array => array_intersect_key($row, array_flip(['key', 'name', 'margin_pct', 'mix_share'])), $items);
+                }
             }
             unset($items);
         }
         unset($quadrants);
+
+        // New and unknown-cost items are side notes, not rankings: keep their counts and only a few examples.
+        foreach (['new_items', 'unknown_cost'] as $key) {
+            $result[$key.'_count'] = count($result[$key]);
+            $result[$key] = $compact ? [] : array_map(
+                fn (array $row): array => array_intersect_key($row, array_flip(['key', 'name', 'role'])),
+                array_slice($result[$key], 0, 5),
+            );
+            if ($compact) {
+                unset($result[$key]);
+            }
+        }
 
         return $result;
     }

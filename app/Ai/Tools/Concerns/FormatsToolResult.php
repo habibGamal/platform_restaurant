@@ -35,7 +35,7 @@ trait FormatsToolResult
      *
      * @param  array<int, string>  $branchMap
      * @param  array<string, mixed>  $metrics
-     * @param  array{summary?: array{complete: int, total: int}|null, warnings?: list<string>}  $completeness
+     * @param  array{summary?: array{complete_branches: int, total_branches: int}|null, warnings?: list<string>}  $completeness
      * @param  array<string, string>  $definitions
      * @param  list<string>  $notes
      * @param  string|null  $summary  a one-line colloquial Arabic summary, placed at the top level when given
@@ -130,32 +130,46 @@ trait FormatsToolResult
      * Build the completeness summary and branch-level warnings for the given query and period.
      *
      * @param  array<int, string>  $branchMap
-     * @return array{summary: array{complete: int, total: int}, warnings: list<string>}
+     * @return array{summary: array{complete_branches: int, total_branches: int}, warnings: list<string>}
      */
     public function buildCompleteness(MetricsQuery $query, Period $period, array $branchMap): array
     {
         $completeness = Completeness::for($query, $period);
         $summary = $completeness->summary();
         $warnings = [];
+        $totalDays = count($period->dates());
 
-        $branchIds = $query->branchIds();
-        foreach ($branchIds as $id) {
+        // One line per branch and problem (not one per day), so the model reads it as a caveat, not a wall of errors.
+        foreach ($query->branchIds() as $id) {
+            if ($completeness->isBranchComplete($id)) {
+                continue;
+            }
+
             $branchName = $branchMap[$id] ?? "فرع {$id}";
-            if (! $completeness->isBranchComplete($id)) {
-                foreach ($period->dates() as $date) {
-                    $status = $completeness->statusFor($id, $date->toDateString());
-                    if ($status === 'missing') {
-                        $warnings[] = "بيانات {$branchName} مفقودة ليوم {$date->toDateString()}.";
-                    } elseif ($status === 'closed') {
-                        $warnings[] = "بيانات {$branchName} غير مطابقة ليوم {$date->toDateString()}.";
-                    }
+            $byStatus = ['missing' => [], 'closed' => []];
+            foreach ($period->dates() as $date) {
+                $status = $completeness->statusFor($id, $date->toDateString());
+                if (isset($byStatus[$status])) {
+                    $byStatus[$status][] = $date->toDateString();
+                }
+            }
+
+            foreach (['missing' => 'مفقودة', 'closed' => 'غير مطابقة'] as $status => $label) {
+                $dates = $byStatus[$status];
+                if ($dates !== []) {
+                    $range = count($dates) === 1 ? $dates[0] : $dates[0].' إلى '.end($dates);
+                    $warnings[] = "بيانات {$branchName} {$label} في ".count($dates)." من {$totalDays} يوم ({$range}).";
                 }
             }
         }
 
         return [
-            'summary' => $summary,
-            'warnings' => array_values(array_unique($warnings)),
+            // Counts branches, not days: a branch is complete only when every day in the period is reconciled.
+            'summary' => [
+                'complete_branches' => (int) ($summary['complete'] ?? 0),
+                'total_branches' => (int) ($summary['total'] ?? 0),
+            ],
+            'warnings' => $warnings,
         ];
     }
 

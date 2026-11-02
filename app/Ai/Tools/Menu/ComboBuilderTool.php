@@ -42,7 +42,7 @@ final class ComboBuilderTool implements ReportsProgress, Tool
     /** @return array<string, Type> */
     public function schema(JsonSchema $schema): array
     {
-        return array_merge($this->reportFilterSchema($schema), ['item_key' => $schema->string()]);
+        return array_merge($this->reportFilterSchema($schema), ['item_key' => $schema->string()->description('Optional. Omit to get the best combo for each top hidden gem in rank order; set only to build combos around one specific main item.')]);
     }
 
     public function handle(Request $request): string

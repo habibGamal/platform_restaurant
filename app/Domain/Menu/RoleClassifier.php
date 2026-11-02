@@ -28,7 +28,7 @@ final class RoleClassifier
     /** The behaviour window ends on the organization's latest completed business date. */
     private const WINDOW_DAYS = 90;
 
-    private const BATCH_SIZE = 100;
+    private const BATCH_SIZE = 40;
 
     /** Items listed per category when asking the model to judge a category. */
     private const CATEGORY_SAMPLE = 12;

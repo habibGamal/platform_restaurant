@@ -30,44 +30,65 @@ final class ComboBuilder
             return ['status' => 'insufficient_data', 'reason' => $analysis['reason'] ?? 'البيانات غير كافية.'] + $empty;
         }
         $groups = $analysis['groups']['main'] ?? [];
-        $targetKey ??= $groups['hidden_gems'][0]['key'] ?? null;
         $eligible = array_merge(...array_values($groups ?: ['empty' => []]));
-        if ($max <= 0 || $targetKey === null || ! in_array($targetKey, array_column($eligible, 'key'), true)) {
+        $limit = min(3, $max);
+        if ($limit <= 0) {
             return ['status' => 'ok'] + $empty;
         }
 
-        $roles = $this->roles->mapFor($org->id);
-        // Do not cap pairs before excluding drinks: the global marketing rule excludes them from combos.
-        $pairs = $this->baskets->pairsFor($query, $roles, $targetKey, PHP_INT_MAX);
-        if ($pairs['status'] !== 'ok') {
-            return ['status' => 'insufficient_data', 'reason' => $pairs['reason'] ?? 'البيانات غير كافية.'] + $empty;
+        // An explicit target gets up to $limit combos of its own. Without one, walk the hidden gems in rank
+        // order and take each one's best companion, so a gem that is never ordered with a side does not
+        // leave the whole answer without a combo.
+        if ($targetKey !== null) {
+            if (! in_array($targetKey, array_column($eligible, 'key'), true)) {
+                return ['status' => 'ok'] + $empty;
+            }
+            $targets = [$targetKey];
+            $perTarget = $limit;
+        } else {
+            $targets = array_column($groups['hidden_gems'] ?? [], 'key');
+            $perTarget = 1;
         }
+
+        $roles = $this->roles->mapFor($org->id);
         $totals = $this->prices($query);
         $combos = [];
-        foreach ($pairs['pairs'] as $pair) {
-            $partnerKey = (string) $pair['partner_key'];
-            $role = $roles->roleOf($partnerKey);
-            if (! in_array($role, [ItemRole::Side, ItemRole::Dessert], true)) {
+        foreach ($targets as $target) {
+            $target = (string) $target;
+            $main = $totals[$target] ?? null;
+            if ($roles->roleOf($target) !== ItemRole::Main || $main === null) {
                 continue;
             }
-            $main = $totals[$targetKey] ?? null;
-            $partner = $totals[$partnerKey] ?? null;
-            if ($roles->roleOf($targetKey) !== ItemRole::Main || $main === null || $partner === null) {
-                continue;
+            // Do not cap pairs before excluding drinks: the global marketing rule excludes them from combos.
+            $pairs = $this->baskets->pairsFor($query, $roles, $target, PHP_INT_MAX);
+            if ($pairs['status'] !== 'ok') {
+                return ['status' => 'insufficient_data', 'reason' => $pairs['reason'] ?? 'البيانات غير كافية.'] + $empty;
             }
-            $pricing = $this->price($main['price'] + $partner['price'], $main['cost'] + $partner['cost'], $floor);
-            if ($pricing === null) {
-                continue;
+            $found = 0;
+            foreach ($pairs['pairs'] as $pair) {
+                $partnerKey = (string) $pair['partner_key'];
+                $role = $roles->roleOf($partnerKey);
+                $partner = $totals[$partnerKey] ?? null;
+                if (! in_array($role, [ItemRole::Side, ItemRole::Dessert], true) || $partner === null) {
+                    continue;
+                }
+                $pricing = $this->price($main['price'] + $partner['price'], $main['cost'] + $partner['cost'], $floor);
+                if ($pricing === null) {
+                    continue;
+                }
+                $combos[] = [
+                    'items' => [
+                        ['key' => $target, 'name' => $pair['anchor_name'], 'role' => 'main', 'list_price' => $main['price']],
+                        ['key' => $partnerKey, 'name' => $pair['partner_name'], 'role' => $role->value, 'list_price' => $partner['price']],
+                    ],
+                    ...$pricing,
+                    'why' => 'الأصناف دي اتطلبت مع بعض في '.$pair['together_orders'].' طلب، وقوة الارتباط '.round((float) $pair['lift'], 2).'، والسعر بيحافظ على هامش الربح المطلوب.',
+                ];
+                if (++$found >= $perTarget || count($combos) >= $limit) {
+                    break;
+                }
             }
-            $combos[] = [
-                'items' => [
-                    ['key' => $targetKey, 'name' => $pair['anchor_name'], 'role' => 'main', 'list_price' => $main['price']],
-                    ['key' => $partnerKey, 'name' => $pair['partner_name'], 'role' => $role->value, 'list_price' => $partner['price']],
-                ],
-                ...$pricing,
-                'why' => 'الأصناف دي اتطلبت مع بعض في '.$pair['together_orders'].' طلب، وقوة الارتباط '.round((float) $pair['lift'], 2).'، والسعر بيحافظ على هامش الربح المطلوب.',
-            ];
-            if (count($combos) >= min(3, $max)) {
+            if (count($combos) >= $limit) {
                 break;
             }
         }

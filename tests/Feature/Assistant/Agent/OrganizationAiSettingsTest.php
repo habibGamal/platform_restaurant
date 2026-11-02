@@ -41,8 +41,10 @@ final class OrganizationAiSettingsTest extends TestCase
             ], $agent->provider());
             $this->assertSame('primary-model', $agent->model());
             $this->assertInstanceOf(HasProviderOptions::class, $agent);
-            $this->assertSame(['reasoning_effort' => 'high'], $agent->providerOptions("byo_openai_{$org->id}"));
-            $this->assertSame(['thinking_level' => 'high'], $agent->providerOptions(Lab::Gemini));
+            // The role classifier always labels at low effort; chat agents follow the organization's reasoning level.
+            $expectedEffort = $agent instanceof ItemRoleClassifier ? 'low' : 'high';
+            $this->assertSame(['reasoning_effort' => $expectedEffort], $agent->providerOptions("byo_openai_{$org->id}"));
+            $this->assertSame(['thinking_level' => $expectedEffort], $agent->providerOptions(Lab::Gemini));
         }
     }
 
@@ -66,11 +68,11 @@ final class OrganizationAiSettingsTest extends TestCase
 
         $this->assertSame(['thinking_level' => 'low'], $whatsapp->providerOptions('gemini'));
         $this->assertInstanceOf(HasProviderOptions::class, $classifier);
-        $this->assertSame(['thinking_level' => 'medium'], $classifier->providerOptions('gemini'));
+        $this->assertSame(['thinking_level' => 'low'], $classifier->providerOptions('gemini'));
 
         AiSetting::factory()->create(['organization_id' => $org->id, 'reasoning_level' => 'high']);
         $this->assertSame(['thinking_level' => 'high'], $whatsapp->providerOptions('gemini'));
-        $this->assertSame(['thinking_level' => 'high'], $classifier->providerOptions('gemini'));
+        $this->assertSame(['thinking_level' => 'low'], $classifier->providerOptions('gemini'), 'The classifier ignores the chat reasoning level.');
     }
 
     public function test_agents_resolve_their_own_organization_settings(): void
