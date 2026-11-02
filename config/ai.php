@@ -23,6 +23,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Item Roles
+    |--------------------------------------------------------------------------
+    |
+    | Minimum confidence for a signal/auto-classified item role to be trusted.
+    | Owner-set roles are always trusted regardless of this value.
+    |
+    */
+
+    'roles' => [
+        'trusted_confidence' => env('AI_ROLES_TRUSTED_CONFIDENCE', 0.70),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Caching
     |--------------------------------------------------------------------------
     |
@@ -128,10 +142,21 @@ return [
         ],
 
         'openai' => [
-            'driver' => 'openai',
+            // Proxies like miraiapi only speak Chat Completions reliably; their Responses API
+            // streams end without `response.completed`. Use `openai` for api.openai.com.
+            'driver' => env('OPENAI_DRIVER', 'openai-compatible'),
             'key' => env('OPENAI_API_KEY'),
-            'url' => env('OPENAI_URL', 'https://api.openai.com/v1'),
+            'url' => env('OPENAI_URL', 'https://api.miraiapi.com/v1'),
             'store' => env('OPENAI_STORE', true),
+            // Required by the openai-compatible driver, which has no built-in defaults.
+            'models' => [
+                'text' => [
+                    'default' => env('OPENAI_MODEL', 'gpt-6.1-sol'),
+                ],
+                'embeddings' => [
+                    'default' => env('OPENAI_EMBEDDINGS_MODEL', 'text-embedding-3-small'),
+                ],
+            ],
         ],
 
         'openai-compatible' => [
