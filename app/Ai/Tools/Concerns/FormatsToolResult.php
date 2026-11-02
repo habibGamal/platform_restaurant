@@ -38,6 +38,7 @@ trait FormatsToolResult
      * @param  array{summary?: array{complete: int, total: int}|null, warnings?: list<string>}  $completeness
      * @param  array<string, string>  $definitions
      * @param  list<string>  $notes
+     * @param  string|null  $summary  a one-line colloquial Arabic summary, placed at the top level when given
      */
     public function formatEnvelope(
         Period $period,
@@ -49,6 +50,7 @@ trait FormatsToolResult
         array $notes = [],
         ?PeriodPreset $preset = null,
         ?ComparisonMode $comparisonMode = null,
+        ?string $summary = null,
     ): string {
         $periodData = [
             'from' => $period->from->toDateString(),
@@ -69,7 +71,8 @@ trait FormatsToolResult
             }
         }
 
-        $envelope = [
+        $envelope = $summary !== null ? ['summary' => $summary] : [];
+        $envelope += [
             'period' => $periodData,
             'comparison' => $comparisonData,
             'branches' => $branchMap,
@@ -208,11 +211,16 @@ trait FormatsToolResult
             }
         }
 
-        // If still over cap, recursively slice any array with more than 1 item
+        // Repeat across nested lists until the whole envelope fits, not merely one subtree.
         $json = (string) json_encode($envelope, JSON_UNESCAPED_UNICODE);
-        if (strlen($json) > $maxBytes) {
+        while (strlen($json) > $maxBytes) {
+            $previous = $json;
             $envelope = $this->trimRecursively($envelope, $maxBytes);
             $json = (string) json_encode($envelope, JSON_UNESCAPED_UNICODE);
+            if ($json === $previous) {
+                // Oversized scalar data cannot be reduced by trimming lists.
+                return (string) json_encode(['error' => 'payload_too_large', 'message_ar' => 'النتيجة كبيرة جداً للعرض.', 'truncated' => true], JSON_UNESCAPED_UNICODE);
+            }
         }
 
         return $json;
@@ -228,8 +236,8 @@ trait FormatsToolResult
     {
         foreach ($data as $key => $value) {
             if (is_array($value)) {
-                if (array_is_list($value) && count($value) > 1) {
-                    $half = (int) ceil(count($value) / 2);
+                if (array_is_list($value) && count($value) > 0) {
+                    $half = (int) floor(count($value) / 2);
                     $data[$key] = array_slice($value, 0, $half);
                 } else {
                     /** @var array<string, mixed> $value */
