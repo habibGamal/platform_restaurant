@@ -150,8 +150,9 @@ return [
             'key' => env('OPENAI_API_KEY'),
             'url' => env('OPENAI_URL', 'https://api.miraiapi.com/v1'),
             'store' => env('OPENAI_STORE', true),
-            // false: fetch each step whole (miraiapi drops tool calls in streamed Claude replies).
-            'stream' => (bool) env('OPENAI_STREAM', false),
+            // false: fetch each step whole instead of streaming (a workaround for proxies that drop
+            // streamed tool calls). Live runs on miraiapi were worse without streaming, so it stays on.
+            'stream' => (bool) env('OPENAI_STREAM', true),
             // Required by the openai-compatible driver, which has no built-in defaults.
             'models' => [
                 'text' => [
