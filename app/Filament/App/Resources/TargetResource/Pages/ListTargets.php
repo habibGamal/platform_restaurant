@@ -2,7 +2,10 @@
 
 namespace App\Filament\App\Resources\TargetResource\Pages;
 
+use App\Domain\Tenancy\AccessibleBranches;
 use App\Filament\App\Resources\TargetResource;
+use App\Models\Branch;
+use App\Models\Restaurant;
 use App\Models\Target;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -20,6 +23,63 @@ class ListTargets extends ListRecords
     {
         return [
             CreateAction::make(),
+            Action::make('restaurantTargets')
+                ->label('إضافة أهداف مؤشرات المطعم')
+                ->icon('heroicon-o-rectangle-stack')
+                ->visible(fn (): bool => auth()->user()?->can('targets.manage') ?? false)
+                ->schema([
+                    Forms\Components\Select::make('restaurant_id')
+                        ->label('المطعم')
+                        ->options(fn (): array => Restaurant::query()->where('organization_id', auth()->user()?->organization_id)->pluck('name', 'id')->all())
+                        ->required(),
+                    Forms\Components\DatePicker::make('target_month')->label('الشهر المستهدف')->displayFormat('Y-m')->required(),
+                    Forms\Components\Select::make('distribution')
+                        ->label('طريقة التوزيع')
+                        ->options(['weekday_weights' => 'حسب أيام الأسبوع', 'flat' => 'بالتساوي'])
+                        ->default('weekday_weights')->required()
+                        ->helperText('تُوزع القيم على أيام كل فرع؛ تعتمد أوزان أيام الأسبوع على مبيعاته التاريخية، وتعود للتوزيع المتساوي عند عدم كفاية البيانات.'),
+                    ...collect(['net_sales' => 'المبيعات', 'net_profit' => 'صافي الربح', 'orders' => 'عدد الطلبات', 'food_cost_pct' => 'نسبة تكلفة الخامات (%)'])
+                        ->map(fn (string $label, string $metric) => Forms\Components\TextInput::make($metric)
+                            ->label($label)->numeric()->minValue(0)->nullable()
+                            ->helperText('تُطبق هذه القيمة على كل فرع متاح في المطعم، وتُترك الأهداف الموجودة دون تغيير.'))
+                        ->values()->all(),
+                ])
+                ->action(function (array $data): void {
+                    $user = auth()->user();
+                    abort_unless($user && $user->can('targets.manage'), 403);
+                    $restaurant = Restaurant::query()->where('organization_id', $user->organization_id)->findOrFail($data['restaurant_id']);
+                    $branches = Branch::query()->where('restaurant_id', $restaurant->id)
+                        ->where('organization_id', $user->organization_id)
+                        ->whereIn('id', AccessibleBranches::ids($user))->get();
+                    $values = collect(['net_sales', 'net_profit', 'orders', 'food_cost_pct'])
+                        ->filter(fn (string $metric): bool => isset($data[$metric]) && $data[$metric] !== '');
+                    if ($values->isEmpty() || $branches->isEmpty()) {
+                        Notification::make()->title('أدخل قيمة لمؤشر واحد على الأقل وتأكد من وجود فروع متاحة للمطعم')->warning()->send();
+
+                        return;
+                    }
+                    $month = Carbon::parse($data['target_month'])->startOfMonth()->format('Y-m-d');
+                    $created = DB::transaction(function () use ($branches, $values, $data, $user, $month): int {
+                        $count = 0;
+                        foreach ($branches as $branch) {
+                            foreach ($values as $metric) {
+                                if (Target::query()->where('branch_id', $branch->id)->where('metric', $metric)->where('period_month', $month)->exists()) {
+                                    continue;
+                                }
+                                Target::create([
+                                    'organization_id' => $user->organization_id, 'branch_id' => $branch->id,
+                                    'metric' => $metric, 'period_month' => $month,
+                                    'value' => $metric === 'food_cost_pct' ? (float) $data[$metric] / 100 : $data[$metric],
+                                    'distribution' => $data['distribution'], 'created_by' => $user->id, 'updated_by' => $user->id,
+                                ]);
+                                $count++;
+                            }
+                        }
+
+                        return $count;
+                    });
+                    Notification::make()->title("تم إنشاء {$created} هدف؛ لم تتغير الأهداف الموجودة")->success()->send();
+                }),
             Action::make('copyPreviousMonth')
                 ->label('نسخ الشهر السابق')
                 ->icon('heroicon-o-document-duplicate')

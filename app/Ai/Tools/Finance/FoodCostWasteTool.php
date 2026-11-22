@@ -36,6 +36,11 @@ final class FoodCostWasteTool extends ReportTool
         ];
     }
 
+    protected function definitions(): array
+    {
+        return ['inventoryVarianceCost' => self::INVENTORY_VARIANCE_DEFINITION];
+    }
+
     protected function summarize(array $metrics, int $branchCount): string
     {
         $waste = $metrics['overview']->wasteCost;

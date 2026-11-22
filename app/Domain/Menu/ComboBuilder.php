@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Menu;
 
+use App\Domain\Menu\Intelligence\BundlePricer;
 use App\Domain\Metrics\MetricsQuery;
 use App\Models\Organization;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -52,20 +53,31 @@ final class ComboBuilder
 
         $roles = $this->roles->mapFor($org->id);
         $totals = $this->prices($query);
+        $targets = array_values(array_filter(
+            array_map('strval', $targets),
+            fn (string $target): bool => $roles->roleOf($target) === ItemRole::Main && isset($totals[$target]),
+        ));
+        if ($targets === []) {
+            return ['status' => 'ok'] + $empty;
+        }
+
+        // One basket pass for every main, grouped by anchor: the self-join over all orders is the slow part,
+        // and running it per hidden gem took minutes on real menus. Pairs stay in lift order within an anchor.
+        // Do not cap pairs before excluding drinks: the global marketing rule excludes them from combos.
+        $pairs = $this->baskets->pairsFor($query, $roles, $targetKey, PHP_INT_MAX);
+        if ($pairs['status'] !== 'ok') {
+            return ['status' => 'insufficient_data', 'reason' => $pairs['reason'] ?? 'البيانات غير كافية.'] + $empty;
+        }
+        $pairsByAnchor = [];
+        foreach ($pairs['pairs'] as $pair) {
+            $pairsByAnchor[(string) $pair['anchor_key']][] = $pair;
+        }
+
         $combos = [];
         foreach ($targets as $target) {
-            $target = (string) $target;
-            $main = $totals[$target] ?? null;
-            if ($roles->roleOf($target) !== ItemRole::Main || $main === null) {
-                continue;
-            }
-            // Do not cap pairs before excluding drinks: the global marketing rule excludes them from combos.
-            $pairs = $this->baskets->pairsFor($query, $roles, $target, PHP_INT_MAX);
-            if ($pairs['status'] !== 'ok') {
-                return ['status' => 'insufficient_data', 'reason' => $pairs['reason'] ?? 'البيانات غير كافية.'] + $empty;
-            }
+            $main = $totals[$target];
             $found = 0;
-            foreach ($pairs['pairs'] as $pair) {
+            foreach ($pairsByAnchor[$target] ?? [] as $pair) {
                 $partnerKey = (string) $pair['partner_key'];
                 $role = $roles->roleOf($partnerKey);
                 $partner = $totals[$partnerKey] ?? null;
@@ -114,19 +126,6 @@ final class ComboBuilder
     /** @return array{list_price: float, suggested_price: float, cost: float, margin_pct: float, discount_pct: float}|null */
     private function price(float $listPrice, float $cost, float $floor): ?array
     {
-        foreach ([0.15, 0.12, 0.10, 0.08, 0.05] as $discount) {
-            $price = $listPrice * (1 - $discount);
-            if (($price - $cost) / $price < $floor) {
-                continue;
-            }
-            $price = floor($price / 5) * 5;
-            if ($price <= $cost || ($price - $cost) / $price < $floor) {
-                continue;
-            }
-
-            return ['list_price' => $listPrice, 'suggested_price' => $price, 'cost' => $cost, 'margin_pct' => ($price - $cost) / $price, 'discount_pct' => 1 - $price / $listPrice];
-        }
-
-        return null;
+        return BundlePricer::price($listPrice, $cost, $floor);
     }
 }

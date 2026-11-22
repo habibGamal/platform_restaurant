@@ -26,7 +26,7 @@ class OverviewBranchTableWidget extends BaseReportTableWidget
 
         return $table
             ->heading('أداء الفروع')
-            ->paginated(false)
+            ->paginated([15, 30, 50, 100])
             ->recordUrl(function (array $record): ?string {
                 $id = $record['branch_id'] ?? null;
                 if (! $id || ($record['id'] ?? null) === 'total') {

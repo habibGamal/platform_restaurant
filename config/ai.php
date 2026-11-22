@@ -39,6 +39,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | MCP Server
+    |--------------------------------------------------------------------------
+    |
+    | The local restaurant MCP server (routes/ai.php) runs its tools as this
+    | user, so that user's organization and branch access apply.
+    |
+    */
+
+    'mcp' => [
+        'user_id' => env('MCP_USER_ID'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Caching
     |--------------------------------------------------------------------------
     |
@@ -71,7 +85,13 @@ return [
         'anthropic' => [
             'driver' => 'anthropic',
             'key' => env('ANTHROPIC_API_KEY'),
-            'url' => env('ANTHROPIC_URL', 'https://api.anthropic.com/v1'),
+            'url' => env('ANTHROPIC_URL'),
+            // Gateways such as Cloudflare AI accept the key only as `Authorization: Bearer`, not the
+            // `x-api-key` header the driver sends. BYO keys replace it via ProviderKeys::withKey().
+            'bearer_auth' => (bool) env('ANTHROPIC_BEARER_AUTH', false),
+            'headers' => (bool) env('ANTHROPIC_BEARER_AUTH', false) && env('ANTHROPIC_API_KEY')
+                ? ['Authorization' => 'Bearer '.env('ANTHROPIC_API_KEY')]
+                : [],
         ],
 
         'azure' => [
@@ -98,6 +118,19 @@ return [
                 'session_name' => env('AWS_BEDROCK_ASSUME_ROLE_SESSION_NAME'),
                 'duration_seconds' => env('AWS_BEDROCK_ASSUME_ROLE_DURATION_SECONDS'),
                 'external_id' => env('AWS_BEDROCK_ASSUME_ROLE_EXTERNAL_ID'),
+            ],
+        ],
+
+        // Cloudflare Workers AI: Cloudflare-hosted `@cf/...` models over its Chat Completions API.
+        // These use the account's Workers AI Neurons (free daily allowance), not AI Gateway credits.
+        'cloudflare' => [
+            'driver' => 'openai-compatible',
+            'url' => env('CLOUDFLARE_AI_URL'),
+            'key' => env('CLOUDFLARE_AI_TOKEN'),
+            'models' => [
+                'text' => [
+                    'default' => env('CLOUDFLARE_AI_MODEL', '@cf/google/gemma-4-26b-a4b-it'),
+                ],
             ],
         ],
 

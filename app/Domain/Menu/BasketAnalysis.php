@@ -7,12 +7,47 @@ namespace App\Domain\Menu;
 use App\Domain\Metrics\MetricsQuery;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\JoinClause;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 final class BasketAnalysis
 {
+    /** Seconds one basket pass is reused (as long as the KPI tool cache): one run asks for several anchors. */
+    private const CACHE_SECONDS = 300;
+
     /** @return array{status: string, reason?: string, orders_considered: int, pairs: list<array<string, mixed>>} */
     public function pairsFor(MetricsQuery $query, ItemRoleMap $roles, ?string $anchorKey = null, int $limit = 10): array
+    {
+        // The order self-join is the slow part and its pair threshold does not depend on the anchor, so pairs
+        // for every main are computed once per scope and role map, then filtered. Lift order is kept.
+        $all = Cache::remember($this->cacheKey($query, $roles), self::CACHE_SECONDS, fn (): array => $this->allPairs($query, $roles));
+        if ($all['status'] !== 'ok') {
+            return $all;
+        }
+        $pairs = $anchorKey === null
+            ? $all['pairs']
+            : array_values(array_filter($all['pairs'], fn (array $pair): bool => $pair['anchor_key'] === $anchorKey));
+
+        return ['status' => 'ok', 'orders_considered' => $all['orders_considered'], 'pairs' => $limit > 0 ? array_slice($pairs, 0, $limit) : []];
+    }
+
+    private function cacheKey(MetricsQuery $query, ItemRoleMap $roles): string
+    {
+        $branchIds = $query->branchIds();
+        sort($branchIds);
+
+        return 'menu:baskets:'.md5((string) json_encode([
+            $query->user->organization_id,
+            $branchIds,
+            $query->filters->period->from->toDateString(),
+            $query->filters->period->to->toDateString(),
+            $query->filters->channel,
+            $roles->fingerprint(),
+        ]));
+    }
+
+    /** @return array{status: string, reason?: string, orders_considered: int, pairs: list<array<string, mixed>>} */
+    private function allPairs(MetricsQuery $query, ItemRoleMap $roles): array
     {
         $multi = $this->multiLineOrders($query);
         $orders = DB::query()->fromSub(clone $multi, 'multi')->count();
@@ -28,14 +63,14 @@ final class BasketAnalysis
         foreach ($counts as $key => $count) {
             $key = (string) $key;
             $role = $roles->roleOf($key);
-            if ($role === ItemRole::Main && ($anchorKey === null || $anchorKey === $key)) {
+            if ($role === ItemRole::Main) {
                 $anchors[] = $key;
             }
             if ($role?->isComboCompanion()) {
                 $partners[] = $key;
             }
         }
-        if ($anchors === [] || $partners === [] || $limit <= 0) {
+        if ($anchors === [] || $partners === []) {
             return ['status' => 'ok', 'orders_considered' => $orders, 'pairs' => []];
         }
 
@@ -65,7 +100,7 @@ final class BasketAnalysis
         }
         usort($pairs, fn (array $a, array $b): int => [$b['lift'], $b['together_orders']] <=> [$a['lift'], $a['together_orders']]);
 
-        return ['status' => 'ok', 'orders_considered' => $orders, 'pairs' => array_slice($pairs, 0, $limit)];
+        return ['status' => 'ok', 'orders_considered' => $orders, 'pairs' => $pairs];
     }
 
     private function scopedOrders(MetricsQuery $query): Builder

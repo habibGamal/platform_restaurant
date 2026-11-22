@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\BuildMenuIntelligence;
 use App\Jobs\ClassifyItemRoles;
 use App\Models\AiRunEvent;
 use Illuminate\Foundation\Inspiring;
@@ -17,4 +18,9 @@ Schedule::command('model:prune', ['--model' => [AiRunEvent::class]])->daily();
 Schedule::call(fn () => ClassifyItemRoles::dispatchForEligibleOrganizations())
     ->name('classify-item-roles')
     ->dailyAt('04:00')
+    ->withoutOverlapping();
+
+Schedule::call(fn () => BuildMenuIntelligence::dispatchForEligibleOrganizations())
+    ->name('build-menu-intelligence')
+    ->dailyAt('04:30')
     ->withoutOverlapping();

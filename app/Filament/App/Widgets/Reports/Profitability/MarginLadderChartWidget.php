@@ -8,6 +8,7 @@ use App\Domain\Metrics\MetricsQuery;
 use App\Domain\Metrics\Reports\ProfitabilityReport;
 use App\Filament\App\Widgets\Reports\BaseReportChartWidget;
 use App\Models\User;
+use Filament\Support\RawJs;
 
 class MarginLadderChartWidget extends BaseReportChartWidget
 {
@@ -65,9 +66,9 @@ class MarginLadderChartWidget extends BaseReportChartWidget
     /**
      * @return array<string, mixed>
      */
-    protected function getOptions(): array
+    protected function getOptions(): RawJs
     {
-        return [
+        return $this->percentageOptions([
             'indexAxis' => 'y',
             'scales' => [
                 'x' => [
@@ -82,6 +83,6 @@ class MarginLadderChartWidget extends BaseReportChartWidget
                     'display' => true,
                 ],
             ],
-        ];
+        ], 'x');
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Assistant;
 
+use App\Domain\Assistant\Ui\MessagePartsRepository;
 use App\Models\AiRunEvent;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -29,6 +30,10 @@ final class RunLog
     /** @var array<string, array{userId: int, conversationId: ?string, text: string, startedAtMs: float}> */
     private array $pendingText = [];
 
+    public function __construct(
+        private readonly ?MessagePartsRepository $messageParts = null,
+    ) {}
+
     public function append(string $runId, int $userId, AssistantEvent $event, ?string $conversationId = null): void
     {
         $conversationId ??= $event->conversationId;
@@ -50,6 +55,7 @@ final class RunLog
 
         if ($event->type === 'done' && $event->messageId !== null) {
             AiRunEvent::query()->where('run_id', $runId)->where('user_id', $userId)->update(['message_id' => $event->messageId]);
+            ($this->messageParts ?? app(MessagePartsRepository::class))->persistRun($runId, $event->messageId);
         }
     }
 
@@ -136,6 +142,9 @@ final class RunLog
             'errorCode' => $event->errorCode,
             'agent' => $event->agent,
             'failed' => $event->failed,
+            'toolCallId' => $event->toolCallId,
+            'input' => $event->input,
+            'output' => $event->output,
         ], fn (mixed $value): bool => $value !== null);
     }
 

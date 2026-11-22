@@ -27,7 +27,7 @@ class ProfitDriftTableWidget extends BaseReportTableWidget
             ->description('الأيام التي تختلف فيها معادلة الربح المسجلة في نقاط البيع (Σ profit_pos) عن مجمل ربح المنصة (K09) بأكثر من 1%')
             ->emptyStateHeading('لا يوجد انحراف في حساب الأرباح')
             ->emptyStateDescription('جميع الأيام المسجلة تتطابق فيها أرباح نقطة البيع مع أرباح المنصة بنسبة خطأ أقل من 1%.')
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     protected function getReportRecords(): ?Closure

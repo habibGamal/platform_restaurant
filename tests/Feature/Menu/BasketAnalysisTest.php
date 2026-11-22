@@ -14,6 +14,7 @@ use App\Domain\Metrics\Period\ReportFilters;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Laravel\Ai\Tools\Request;
 use Tests\Fixtures\MenuFixture;
@@ -52,6 +53,30 @@ class BasketAnalysisTest extends TestCase
     private function analyse(?User $user = null, string $from = MenuFixture::FROM, ?string $anchor = null): array
     {
         return app(BasketAnalysis::class)->pairsFor($this->metricsQuery($user, $from), app(ItemRoles::class)->mapFor($this->fixture->organization->id), $anchor);
+    }
+
+    public function test_one_basket_pass_serves_every_anchor_until_roles_change(): void
+    {
+        // bought_together for two gems plus combo_builder used to rerun the whole order self-join each time.
+        $all = app(BasketAnalysis::class)->pairsFor($this->metricsQuery(), app(ItemRoles::class)->mapFor($this->fixture->organization->id), null, PHP_INT_MAX);
+        DB::enableQueryLog();
+        $zorba = $this->analyse(anchor: 'ZORBA-PLATE');
+        $kelto = app(BasketAnalysis::class)->pairsFor($this->metricsQuery(), app(ItemRoles::class)->mapFor($this->fixture->organization->id), 'KELTO-WRAP', PHP_INT_MAX);
+        $joins = fn (): int => count(array_filter(DB::getQueryLog(), fn (array $q): bool => str_contains($q['query'], 'together_orders')));
+        $this->assertSame(0, $joins());
+
+        // Same answer as a fresh per-anchor run.
+        $this->assertNotEmpty($zorba['pairs']);
+        $this->assertSame(['ZORBA-PLATE'], array_values(array_unique(array_column($zorba['pairs'], 'anchor_key'))));
+        $this->assertSame(array_values(array_filter($all['pairs'], fn (array $p): bool => $p['anchor_key'] === 'KELTO-WRAP')), $kelto['pairs']);
+
+        // An owner role change is visible at once.
+        app(ItemRoles::class)->setOwnerRole($this->fixture->organization->id, 'LUMO-RICE', ItemRole::Raw);
+        $after = $this->analyse(anchor: 'ZORBA-PLATE');
+        $this->assertSame(1, $joins());
+        $this->assertNotContains('LUMO-RICE', array_column($after['pairs'], 'partner_key'));
+        DB::disableQueryLog();
+        DB::flushQueryLog();
     }
 
     public function test_pairs_are_ranked_by_lift_and_exclude_non_companions(): void
@@ -121,11 +146,13 @@ class BasketAnalysisTest extends TestCase
         unset($copy['id']);
         $copy['uuid'] = 'duplicate-line';
         DB::table('wh_order_items')->insert($copy);
+        Cache::flush(); // basket passes are reused for a few minutes; this test changes orders in between
         $after = $this->analyse(anchor: 'ZORBA-PLATE');
         $this->assertSame($pair, $after['pairs'][0]);
         $this->assertSame($before['orders_considered'], $after['orders_considered']);
 
         DB::table('wh_orders')->where('branch_id', $line->branch_id)->where('uuid', $line->order_uuid)->update(['status' => 'cancelled']);
+        Cache::flush();
         $cancelled = $this->analyse(anchor: 'ZORBA-PLATE');
         $this->assertSame($before['orders_considered'] - 1, $cancelled['orders_considered']);
         $this->assertSame($pair['together_orders'] - 1, $cancelled['pairs'][0]['together_orders']);

@@ -9,6 +9,7 @@ use App\Domain\Metrics\Reports\SalesComparisonReport;
 use App\Filament\App\Widgets\Reports\BaseReportChartWidget;
 use App\Models\User;
 use App\Support\BranchColor;
+use Filament\Support\RawJs;
 
 class SalesMixChartWidget extends BaseReportChartWidget
 {
@@ -82,9 +83,9 @@ class SalesMixChartWidget extends BaseReportChartWidget
         ];
     }
 
-    protected function getOptions(): array
+    protected function getOptions(): RawJs
     {
-        return [
+        return $this->percentageOptions([
             'scales' => [
                 'x' => [
                     'stacked' => true,
@@ -103,6 +104,6 @@ class SalesMixChartWidget extends BaseReportChartWidget
                     'enabled' => true,
                 ],
             ],
-        ];
+        ]);
     }
 }

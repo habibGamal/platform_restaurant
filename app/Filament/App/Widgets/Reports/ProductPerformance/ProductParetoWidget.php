@@ -8,6 +8,7 @@ use App\Domain\Metrics\MetricsQuery;
 use App\Domain\Metrics\Reports\ProductPerformanceReport;
 use App\Filament\App\Widgets\Reports\BaseReportChartWidget;
 use App\Models\User;
+use Filament\Support\RawJs;
 
 class ProductParetoWidget extends BaseReportChartWidget
 {
@@ -16,6 +17,11 @@ class ProductParetoWidget extends BaseReportChartWidget
     protected function getType(): string
     {
         return 'bar';
+    }
+
+    protected function getOptions(): RawJs
+    {
+        return $this->percentageOptions();
     }
 
     public function getDescription(): ?string
@@ -36,7 +42,7 @@ class ProductParetoWidget extends BaseReportChartWidget
 
         $ratioPct = round($pareto->itemsRatio80Pct * 100, 1);
 
-        return "{$pareto->itemsCount80Pct} من {$pareto->itemsCountTotal} صنف يحقق 80% من إجمالي المبيعات ({$ratioPct}% من إجمالي الأصناف)";
+        return "{$pareto->itemsCount80Pct} من {$pareto->itemsCountTotal} صنف يحقق 80% من إجمالي المبيعات ({$ratioPct}% من إجمالي الأصناف). النسبة التراكمية تجمع حصة كل صنف مع حصص الأصناف الأعلى مبيعاً قبله؛ مثلاً 40% ثم 25% تصبح 65%.";
     }
 
     protected function getData(): array

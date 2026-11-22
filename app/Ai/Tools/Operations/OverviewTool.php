@@ -36,6 +36,11 @@ final class OverviewTool extends ReportTool
         ];
     }
 
+    protected function definitions(): array
+    {
+        return ['inventory_variance' => self::INVENTORY_VARIANCE_DEFINITION];
+    }
+
     protected function summarize(array $metrics, int $branchCount): string
     {
         $sales = $metrics['overview']['sales']['value'];

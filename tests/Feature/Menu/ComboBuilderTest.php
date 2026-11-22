@@ -73,6 +73,22 @@ class ComboBuilderTest extends TestCase
         $this->assertSame(68.0, $result['combos'][0]['cost']);
     }
 
+    public function test_default_run_computes_order_pairs_once_for_all_hidden_gems(): void
+    {
+        // A second high-margin, low-volume main, so the default run walks more than one hidden gem.
+        DB::table('agg_product_daily')->where('product_ref', 'NADD-BOWL')->update(['net_sales' => DB::raw('qty_sold * 200'), 'cogs' => DB::raw('qty_sold * 40')]);
+        $gems = app(MenuEngineeringAnalysis::class)->run($this->metricsQuery(), $this->fixture->organization)['groups']['main']['hidden_gems'];
+        $this->assertGreaterThan(1, count($gems));
+
+        DB::enableQueryLog();
+        app(ComboBuilder::class)->proposeFor($this->metricsQuery(), $this->fixture->organization);
+        $pairQueries = array_filter(DB::getQueryLog(), fn (array $q): bool => str_contains($q['query'], 'together_orders'));
+        DB::disableQueryLog();
+        DB::flushQueryLog();
+
+        $this->assertCount(1, $pairQueries);
+    }
+
     public function test_unsafe_or_unknown_cost_combos_and_non_main_targets_are_dropped(): void
     {
         $builder = app(ComboBuilder::class);

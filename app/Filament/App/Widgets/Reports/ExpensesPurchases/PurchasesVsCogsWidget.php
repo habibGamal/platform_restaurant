@@ -24,7 +24,7 @@ class PurchasesVsCogsWidget extends BaseReportTableWidget
         return parent::table($table)
             ->heading('المشتريات مقابل تكلفة المبيعات (Purchases vs COGS)')
             ->description('مقارنة صافي المشتريات (K20) مقابل تكلفة البضاعة المباعة (K08) لمراقبة حركة وتراكم المخزون والهالك غير المسجل')
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     protected function getReportRecords(): ?Closure

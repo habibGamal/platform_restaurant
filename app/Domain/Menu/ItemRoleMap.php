@@ -17,6 +17,15 @@ final class ItemRoleMap
         return $this->trusted[$itemKey] ?? null;
     }
 
+    /** Changes whenever any trusted role changes, for keying results that depend on roles. */
+    public function fingerprint(): string
+    {
+        $roles = array_map(fn (ItemRole $role): string => $role->value, $this->trusted);
+        ksort($roles);
+
+        return md5((string) json_encode($roles));
+    }
+
     public function isTrusted(string $itemKey): bool
     {
         return isset($this->trusted[$itemKey]);

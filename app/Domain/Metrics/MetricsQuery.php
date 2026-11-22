@@ -57,15 +57,18 @@ final class MetricsQuery
 
         $accessibleBranchIds = AccessibleBranches::ids($this->user);
 
-        // 1. Explicit branch IDs
+        // Explicit selections must be authorized before combining the scope filters.
         if ($this->filters->branchIds !== null && count($this->filters->branchIds) > 0) {
             $diff = array_diff($this->filters->branchIds, $accessibleBranchIds);
             if (! empty($diff)) {
                 throw new AuthorizationException('User does not have access to one or more requested branches.');
             }
             $candidateIds = $this->filters->branchIds;
-        } elseif ($this->filters->branchSetId !== null) {
-            // 2. Branch set members (visible: org-wide or own)
+        } else {
+            $candidateIds = $accessibleBranchIds;
+        }
+
+        if ($this->filters->branchSetId !== null) {
             $branchSet = BranchSet::withoutGlobalScopes()
                 ->where('id', $this->filters->branchSetId)
                 ->where('organization_id', $this->user->organization_id)
@@ -75,24 +78,24 @@ final class MetricsQuery
                 ->first();
 
             if ($branchSet !== null) {
-                $candidateIds = $branchSet->branches()
+                $setIds = $branchSet->branches()
                     ->pluck('branches.id')
                     ->map(fn ($id): int => (int) $id)
                     ->all();
             } else {
-                $candidateIds = [];
+                $setIds = [];
             }
-        } elseif ($this->filters->restaurantId !== null) {
-            // 3. Restaurant's branches
-            $candidateIds = Branch::withoutGlobalScopes()
+            $candidateIds = array_values(array_intersect($candidateIds, $setIds));
+        }
+
+        if ($this->filters->restaurantId !== null) {
+            $restaurantIds = Branch::withoutGlobalScopes()
                 ->where('organization_id', $this->user->organization_id)
                 ->where('restaurant_id', $this->filters->restaurantId)
                 ->pluck('id')
                 ->map(fn ($id): int => (int) $id)
                 ->all();
-        } else {
-            // 4. All accessible branches
-            $candidateIds = $accessibleBranchIds;
+            $candidateIds = array_values(array_intersect($candidateIds, $restaurantIds));
         }
 
         // ALWAYS intersect with accessible branches

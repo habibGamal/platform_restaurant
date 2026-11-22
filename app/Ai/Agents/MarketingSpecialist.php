@@ -8,9 +8,13 @@ use App\Ai\Tools\Context\FindBranches;
 use App\Ai\Tools\Context\ResolvePeriod;
 use App\Ai\Tools\Menu\BoughtTogether;
 use App\Ai\Tools\Menu\ComboBuilderTool;
+use App\Ai\Tools\Menu\GetAffinities;
+use App\Ai\Tools\Menu\GetComboCandidates;
+use App\Ai\Tools\Menu\GetItemCard;
 use App\Ai\Tools\Menu\ItemTimingTool;
 use App\Ai\Tools\Menu\ItemTrendsTool;
 use App\Ai\Tools\Menu\MenuEngineering;
+use App\Ai\Tools\Menu\RankItems;
 use App\Ai\Tools\Metrics\GetKpis;
 use App\Ai\Tools\Metrics\QueryMetrics;
 use Laravel\Ai\Attributes\MaxSteps;
@@ -36,7 +40,7 @@ final class MarketingSpecialist extends SpecialistAgent
 
     protected function roleInstructions(): string
     {
-        return 'You analyze marketing and menu performance. Focus lists and combos must exclude drink, addon, adjustment, raw and untrusted roles. Use only tool-ranked eligible items; do not substitute highest-volume items. Each proposed combo must come from combo_builder with exactly one main and margin at or above its returned floor. Return compact bullet findings and reasons using the matching skill.';
+        return 'You analyze marketing and menu performance. Focus lists rank items within their segment (role and price tier) via rank_items: never compare a family tray with a single meal, and do not substitute highest-volume items. Combos come from get_combo_candidates: exactly one hero main, drinks only as attach items, never addon, adjustment, raw or untrusted-role items, approved offers first, and margin at or above the returned floor. Use get_item_card to explain what an item is and how many it serves. Return compact bullet findings and reasons using the matching skill.';
     }
 
     /** @return iterable<Tool> */
@@ -52,6 +56,10 @@ final class MarketingSpecialist extends SpecialistAgent
             new ItemTimingTool($this->user),
             new GetKpis($this->user),
             new QueryMetrics($this->user),
+            new RankItems($this->user),
+            new GetItemCard($this->user),
+            new GetComboCandidates($this->user),
+            new GetAffinities($this->user),
         ];
     }
 

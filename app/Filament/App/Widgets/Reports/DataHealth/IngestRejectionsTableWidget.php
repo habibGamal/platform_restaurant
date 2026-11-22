@@ -27,7 +27,7 @@ class IngestRejectionsTableWidget extends BaseReportTableWidget
             ->description('المستندات التي رُفضت أثناء الاستقبال بسبب أخطاء بنية البيانات أو عدم توافق الإصدار')
             ->emptyStateHeading('لا توجد مستندات مرفوضة')
             ->emptyStateDescription('لم يتم تسجيل أي رفض لمستندات الاستقبال خلال الفترة المحددة.')
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     protected function getReportRecords(): ?Closure

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Domain\Assistant\AiAccess;
 use App\Domain\Ingestion\Contracts\DocumentHandlerRegistry;
 use App\Domain\Ingestion\Contracts\HandleResult;
 use App\Domain\Ingestion\Exceptions\FencedWorkerException;
@@ -9,7 +10,9 @@ use App\Domain\Ingestion\Support\DirtyDateOutbox;
 use App\Models\Branch;
 use App\Models\IngestBatch;
 use App\Models\IngestRejection;
+use App\Models\Organization;
 use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -278,6 +281,9 @@ class ProcessIngestBatch implements ShouldQueue
 
         $dirtyDates = [];
         $catalogGrew = false;
+        $menuDataChanged = false;
+        // Same clock as BuildMenuIntelligence, whose periods end yesterday.
+        $today = CarbonImmutable::today()->toDateString();
 
         foreach ($envelope['documents'] as $index => $doc) {
             if (! is_array($doc) || ! isset($doc['uuid'])) {
@@ -350,6 +356,12 @@ class ProcessIngestBatch implements ShouldQueue
 
                 if ($result->applied && $result->created && in_array($docType, ['product', 'category'], true)) {
                     $catalogGrew = true;
+                }
+
+                // Today's sales are rebuilt nightly anyway; only catalog changes and back-dated sales justify an early build.
+                if ($result->applied && (in_array($docType, ['product', 'category', 'recipe'], true)
+                    || (in_array($docType, ['order', 'order_return', 'waste'], true) && $this->hasDateBefore($result->dirtyDates, $today)))) {
+                    $menuDataChanged = true;
                 }
             } catch (FencedWorkerException $e) {
                 // Stale worker fenced! Must abort immediately.
@@ -468,6 +480,17 @@ class ProcessIngestBatch implements ShouldQueue
             }
         }
 
+        $organization = $menuDataChanged ? Organization::query()->find($branch->organization_id) : null;
+        if ($organization !== null && app(AiAccess::class)->allowsOrganization($organization)) {
+            // Menu or past sales data changed: refresh the menu intelligence once things settle. The unique lock collapses bursts.
+            try {
+                BuildMenuIntelligence::dispatch($organization->id, null, classifierCalls: 2)
+                    ->delay(now()->addMinutes((int) config('menu.intelligence.build_delay_minutes')));
+            } catch (Throwable $e) {
+                report($e);
+            }
+        }
+
         $batchDatesWithGen = DB::table('ingest_dirty_dates')
             ->where('ingest_batch_id', $this->batchId)
             ->where('branch_id', $branch->id)
@@ -503,5 +526,17 @@ class ProcessIngestBatch implements ShouldQueue
                 }
             }
         }
+    }
+
+    /** @param  list<string>  $dates  business dates (Y-m-d) */
+    private function hasDateBefore(array $dates, string $today): bool
+    {
+        foreach ($dates as $date) {
+            if ((string) $date < $today) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

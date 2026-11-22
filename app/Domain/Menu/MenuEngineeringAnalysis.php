@@ -14,9 +14,10 @@ use InvalidArgumentException;
  * every marketable role over the query's period and branch scope. Items without a trusted role, new
  * items (fewer than MIN_DAYS_ON_SALE days on sale) and items with unknown cost never enter a group.
  *
- * @phpstan-type ItemRow array{key: string, name: string, role: string, qty: float, net_sales: float, unit_margin: float, margin_pct: float|null, mix_share: float, popularity_ratio: float, margin_vs_avg: float|null}
+ * @phpstan-import-type ItemRow from MenuQuadrants
+ * @phpstan-import-type Quadrants from MenuQuadrants
+ *
  * @phpstan-type SideRow array{key: string, name: string, role: string, qty: float, net_sales: float, days_on_sale: int}
- * @phpstan-type Quadrants array{hidden_gems: list<ItemRow>, stars: list<ItemRow>, workhorses: list<ItemRow>, weak: list<ItemRow>}
  * @phpstan-type Result array{status: 'ok'|'insufficient_data', reason?: string, groups?: array<string, Quadrants>, new_items: list<SideRow>, unknown_cost: list<SideRow>, unclassified_count: int, floors: array<string, float>}
  */
 final class MenuEngineeringAnalysis
@@ -28,7 +29,7 @@ final class MenuEngineeringAnalysis
     public const MIN_COMPLETED_ORDERS = 200;
 
     /** An item is popular when its mix share reaches this fraction of the fair share 1/N. */
-    public const POPULARITY_THRESHOLD = 0.70;
+    public const POPULARITY_THRESHOLD = MenuQuadrants::POPULARITY_THRESHOLD;
 
     public function __construct(private readonly ItemRoles $roles) {}
 
@@ -89,7 +90,7 @@ final class MenuEngineeringAnalysis
             if ($rows === []) {
                 continue;
             }
-            [$groups[$role], $floors[$role]] = $this->quadrants($rows);
+            [$groups[$role], $floors[$role]] = MenuQuadrants::classify($rows);
         }
 
         return [
@@ -100,62 +101,6 @@ final class MenuEngineeringAnalysis
             'unclassified_count' => $unclassified,
             'floors' => $floors,
         ];
-    }
-
-    /**
-     * @param  non-empty-list<array{key: string, name: string, role: string, qty: float, net_sales: float, cogs: float}>  $rows
-     * @return array{0: Quadrants, 1: float}
-     */
-    private function quadrants(array $rows): array
-    {
-        $n = count($rows);
-        $totalQty = array_sum(array_column($rows, 'qty'));
-        $totalNet = array_sum(array_column($rows, 'net_sales'));
-        $totalMargin = $totalNet - array_sum(array_column($rows, 'cogs'));
-        $avgCm = $totalMargin / $totalQty;
-
-        $quadrants = ['hidden_gems' => [], 'stars' => [], 'workhorses' => [], 'weak' => []];
-
-        foreach ($rows as $row) {
-            $margin = $row['net_sales'] - $row['cogs'];
-            $unitCm = $margin / $row['qty'];
-            $mixShare = $row['qty'] / $totalQty;
-            $popularityRatio = $mixShare * $n;
-
-            $popular = $popularityRatio >= self::POPULARITY_THRESHOLD;
-            $profitable = $unitCm >= $avgCm;
-
-            $quadrant = match (true) {
-                $profitable && ! $popular => 'hidden_gems',
-                $profitable => 'stars',
-                $popular => 'workhorses',
-                default => 'weak',
-            };
-
-            $quadrants[$quadrant][] = [
-                'key' => $row['key'],
-                'name' => $row['name'],
-                'role' => $row['role'],
-                'qty' => round($row['qty'], 3),
-                'net_sales' => round($row['net_sales'], 2),
-                'unit_margin' => round($unitCm, 2),
-                'margin_pct' => $row['net_sales'] > 0 ? round($margin / $row['net_sales'], 4) : null,
-                'mix_share' => round($mixShare, 4),
-                'popularity_ratio' => round($popularityRatio, 4),
-                'margin_vs_avg' => $avgCm > 0 ? round($unitCm / $avgCm, 4) : null,
-            ];
-        }
-
-        $byMargin = fn (array $a, array $b): int => [$b['margin_vs_avg'], $b['qty']] <=> [$a['margin_vs_avg'], $a['qty']];
-        $byPopularity = fn (array $a, array $b): int => [$b['popularity_ratio'], $b['margin_vs_avg']] <=> [$a['popularity_ratio'], $a['margin_vs_avg']];
-        usort($quadrants['hidden_gems'], $byMargin);
-        usort($quadrants['stars'], $byMargin);
-        usort($quadrants['workhorses'], $byPopularity);
-        usort($quadrants['weak'], $byMargin);
-
-        $floor = $totalNet > 0 ? $totalMargin / $totalNet : 0.0;
-
-        return [$quadrants, $floor];
     }
 
     /** The Arabic reason the period cannot support the analysis, or null when it can. */

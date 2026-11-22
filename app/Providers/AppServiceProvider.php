@@ -4,9 +4,11 @@ namespace App\Providers;
 
 use App\Ai\Gateway\BufferedChatCompletionsGateway;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterval;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\DevCommands;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
@@ -14,6 +16,7 @@ use Illuminate\Validation\Rules\Password;
 use Laravel\Ai\Ai;
 use Laravel\Ai\AiManager;
 use Laravel\Ai\Providers\OpenAiCompatibleProvider;
+use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -33,6 +36,24 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
         $this->configureAiProviders();
         $this->configureDevProcesses();
+        $this->configureOAuth();
+    }
+
+    /**
+     * OAuth for the remote MCP server: Laravel MCP's consent page, short-lived access tokens
+     * and refresh tokens so connected AI clients re-check access regularly.
+     */
+    protected function configureOAuth(): void
+    {
+        Passport::authorizationView(fn (array $parameters) => view('mcp::authorize', $parameters));
+        Passport::tokensExpireIn(CarbonInterval::hours(8));
+        Passport::refreshTokensExpireIn(CarbonInterval::days(30));
+
+        // Read here, after .env is loaded (bootstrap/app.php runs too early for env()).
+        $proxies = config('app.trusted_proxies');
+        if (is_string($proxies) && trim($proxies) !== '') {
+            TrustProxies::at(trim($proxies) === '*' ? '*' : array_map('trim', explode(',', $proxies)));
+        }
     }
 
     /**

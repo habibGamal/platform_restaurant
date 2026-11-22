@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Assistant\Evals;
 
+use App\Ai\Tools\Menu\GetComboCandidates;
+use App\Ai\Tools\Menu\RankItems;
 use App\Domain\Assistant\AssistantEvent;
 use App\Domain\Assistant\AssistantReply;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant;
 use App\Domain\Assistant\Evals\EvalRunner;
+use App\Domain\Assistant\GroundingResult;
 use App\Domain\Assistant\NumericGroundingChecker;
 use App\Domain\Menu\ItemRole;
 use App\Domain\Menu\ItemRoles;
 use App\Models\ItemRoleAssignment;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Closure;
 use Generator;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -560,6 +564,70 @@ class EvalRunnerTest extends TestCase
             ->where('organization_id', $this->fixture->organization->id)
             ->where('source', 'owner')
             ->count());
+    }
+
+    public function test_menu_fixture_is_prepared_for_the_menu_intelligence_tools(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-11-08 12:00:00', 'Africa/Cairo'));
+        $menu = MenuFixture::create();
+        $runner = new class($this->checker, $this->fixture, $menu) extends EvalRunner
+        {
+            public function prepareMenu(): TwoBranchesTwoWeeks|MenuFixture
+            {
+                return $this->fixtureFor(['id' => 'menu_case', 'category' => 'rules', 'persona' => 'owner', 'question' => '', 'expected_tools' => [], 'expected_numbers' => [], 'must_refuse' => false, 'fixture' => 'menu']);
+            }
+        };
+
+        $runner->prepareMenu();
+
+        $orgId = $menu->organization->id;
+        foreach (EvalRunner::MENU_PERIODS as $period) {
+            $this->assertGreaterThan(0, DB::table('item_period_stats')->where('organization_id', $orgId)->where('period_key', $period)->count(), $period);
+            $this->assertGreaterThan(0, DB::table('item_rankings')->where('organization_id', $orgId)->where('period_key', $period)->where('strategy', 'push_next_month')->count(), $period);
+        }
+
+        // The two-month marketing case gets real rankings instead of «البيانات لسه بتتجهز», still without drinks,
+        // add-ons, adjustments or raw items in the focus lists.
+        $ranked = json_decode((new RankItems($menu->owner))->handle(new Request(['strategy' => 'push_next_month', 'months' => EvalRunner::MENU_PERIODS])), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('ok', $ranked['metrics']['status']);
+        $ranks = array_merge(...array_map(fn (array $segment): array => array_column($segment['items'], 'item_key'), array_values($ranked['metrics']['segments'])));
+        $this->assertSame([], array_values(array_intersect($ranks, ['VIRA-SODA', 'TINY-SPRING', 'GLAZE-DIP', 'DIFF-LINE', 'BULK-FLOUR'])));
+
+        // Prepared combos, if any, pass the combo rule every marketing case grades.
+        $combos = (new GetComboCandidates($menu->owner))->handle(new Request(['months' => EvalRunner::MENU_PERIODS, 'limit' => 6]));
+        $this->assertSame([], $runner->gradeRules(
+            rules: ['combos_one_main_above_floor'],
+            calledTools: ['get_combo_candidates'],
+            delegatedAgents: [],
+            toolResults: [['tool' => 'get_combo_candidates', 'result' => $combos]],
+            replyText: '',
+            grounding: new GroundingResult(grounded: true),
+            organizationId: $orgId,
+        ));
+    }
+
+    public function test_menu_fixture_build_does_not_depend_on_the_real_date(): void
+    {
+        // Long after the fixture's sales: a build at this real date would find no recently sold items.
+        $this->travelTo(CarbonImmutable::parse('2027-06-01 09:00:00', 'Africa/Cairo'));
+        $menu = MenuFixture::create();
+        $runner = new class($this->checker, $this->fixture, $menu) extends EvalRunner
+        {
+            public function prepareMenu(): TwoBranchesTwoWeeks|MenuFixture
+            {
+                return $this->fixtureFor(['id' => 'menu_case', 'category' => 'rules', 'persona' => 'owner', 'question' => '', 'expected_tools' => [], 'expected_numbers' => [], 'must_refuse' => false, 'fixture' => 'menu']);
+            }
+        };
+
+        $runner->prepareMenu();
+
+        $orgId = $menu->organization->id;
+        foreach (EvalRunner::MENU_PERIODS as $period) {
+            $this->assertGreaterThan(0, DB::table('item_rankings')->where('organization_id', $orgId)->where('period_key', $period)->where('strategy', 'push_next_month')->count(), $period);
+            $this->assertGreaterThan(0, DB::table('combo_candidates')->where('organization_id', $orgId)->where('period_key', $period)->count(), $period);
+        }
+        // The clock is handed back after the build.
+        $this->assertSame('2027-06-01', CarbonImmutable::now('Africa/Cairo')->toDateString());
     }
 
     public function test_unknown_fixture_is_rejected(): void

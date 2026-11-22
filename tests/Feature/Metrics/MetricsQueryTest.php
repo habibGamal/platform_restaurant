@@ -140,6 +140,17 @@ class MetricsQueryTest extends TestCase
         $this->assertEqualsCanonicalizing([$this->branch2->id, $this->branch3->id], $query->branchIds());
     }
 
+    public function test_restaurant_and_branch_group_are_both_applied(): void
+    {
+        $set = BranchSet::factory()->create(['organization_id' => $this->org->id, 'user_id' => null]);
+        $set->branches()->sync([$this->branch2->id, $this->branch3->id]);
+        $filters = ReportFilters::fromArray([
+            'restaurant' => $this->rest1->id, 'set' => $set->id,
+        ], CarbonImmutable::parse('2026-10-07'));
+
+        $this->assertSame([$this->branch2->id], MetricsQuery::for($this->owner, $filters)->branchIds());
+    }
+
     public function test_explicit_forbidden_branch_throws_authorization_exception(): void
     {
         $otherOrg = Organization::factory()->create();

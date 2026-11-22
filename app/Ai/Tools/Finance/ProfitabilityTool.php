@@ -36,6 +36,14 @@ final class ProfitabilityTool extends ReportTool
         ];
     }
 
+    protected function definitions(): array
+    {
+        return [
+            'inventoryVarianceCost' => self::INVENTORY_VARIANCE_DEFINITION,
+            'netProfit' => 'grossProfit - totalExpenses - wasteCost - inventoryVarianceCost.',
+        ];
+    }
+
     protected function summarize(array $metrics, int $branchCount): string
     {
         $profit = $metrics['overview']['net_profit'];

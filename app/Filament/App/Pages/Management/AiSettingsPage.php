@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\App\Pages\Management;
 
+use App\Ai\ProviderKeys;
 use App\Domain\AiBilling\BudgetGuard;
 use App\Domain\AiBilling\BudgetState;
 use App\Enums\OrganizationPlan;
@@ -543,9 +544,8 @@ class AiSettingsPage extends Page
             $baseConfig = config("ai.providers.{$providerName}", ['driver' => $providerName]);
             $onDemandName = "byo_test_{$providerName}_{$org->id}";
             try {
-                $built = Ai::build(array_merge($baseConfig, [
+                $built = Ai::build(array_merge(ProviderKeys::withKey($baseConfig, $setting->byo_key), [
                     'name' => $onDemandName,
-                    'key' => $setting->byo_key,
                 ]));
                 $providerName = $built->name();
             } catch (Throwable) {
@@ -555,6 +555,13 @@ class AiSettingsPage extends Page
                     ->body('تعذر تجهيز مفتاحك الخاص للاتصال. احفظ المفتاح مرة أخرى ثم أعد الاختبار.')
                     ->danger()
                     ->send();
+
+                logger()->error('فشل اختبار الاتصال بمزود الذكاء الاصطناعي.', [
+                    'provider' => $providerName,
+                    'model' => $model,
+                    'organization_id' => $org->id,
+                    'timeout' => str_contains($e->getPrevious()?->getMessage() ?? '', 'cURL error 28'),
+                ]);
 
                 return;
             }
@@ -662,6 +669,7 @@ class AiSettingsPage extends Page
             'anthropic' => 'Anthropic (Claude)',
             'openai' => 'OpenAI (ChatGPT)',
             'openai-compatible' => 'OpenAI-compatible (AGY API)',
+            'cloudflare' => 'Cloudflare Workers AI',
             'gemini' => 'Google Gemini',
             'openrouter' => 'OpenRouter',
             'deepseek' => 'DeepSeek',
@@ -710,6 +718,11 @@ class AiSettingsPage extends Page
                 'gemini-3.8-flash-high',
                 'gemini-3.8-flash-medium',
                 'gemini-3.8-flash-low',
+            ],
+            // Free-plan models that passed a tool-call and Arabic answer check.
+            'cloudflare' => [
+                '@cf/google/gemma-4-26b-a4b-it',
+                '@cf/mistralai/mistral-small-3.1-24b-instruct',
             ],
             'gemini' => [
                 'gemini-1.5-pro',

@@ -64,7 +64,7 @@ class OverviewDataFreshnessWidget extends BaseReportTableWidget
                     ->url(fn (): string => DataHealth::canAccess() ? DataHealth::getUrl() : url('/app/reports/data-health'))
                     ->link(),
             ])
-            ->paginated(false)
+            ->paginated([15, 30, 50, 100])
             ->emptyStateHeading('لا توجد فروع محددة')
             ->emptyStateDescription(null);
     }

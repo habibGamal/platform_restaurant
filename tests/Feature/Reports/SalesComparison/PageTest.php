@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Reports\SalesComparison;
 
+use App\Filament\App\Components\ReportScopeSelector;
 use App\Filament\App\Pages\Reports\SalesComparison;
 use App\Filament\App\Widgets\Reports\SalesComparison\DiscountIntensityWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\GrowthDecompositionTableWidget;
+use App\Filament\App\Widgets\Reports\SalesComparison\OrderTypeSalesWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\SalesKpiMatrixWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\SalesKpiOverviewWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\SalesMixChartWidget;
@@ -36,6 +38,7 @@ class PageTest extends TestCase
      */
     private const array WIDGET_CLASSES = [
         SalesKpiOverviewWidget::class,
+        OrderTypeSalesWidget::class,
         SalesKpiMatrixWidget::class,
         TrafficBasketScatterWidget::class,
         SalesTrendChartWidget::class,
@@ -70,6 +73,60 @@ class PageTest extends TestCase
         foreach (self::WIDGET_CLASSES as $widgetClass) {
             Livewire::test($widgetClass)->assertSuccessful();
         }
+    }
+
+    public function test_top_bar_scope_updates_report_and_survives_filter_apply_and_reset(): void
+    {
+        $this->actingAs($this->fixture->owner);
+        $restaurant = $this->fixture->restaurant->id;
+        $branch = $this->fixture->branchA->id;
+
+        Livewire::test(ReportScopeSelector::class)
+            ->set('restaurant', (string) $restaurant)
+            ->set('branches', [(string) $branch])
+            ->assertDispatched('report-scope-changed', restaurant: $restaurant, branches: [$branch]);
+
+        Livewire::test(SalesComparison::class)
+            ->assertSet('filters.restaurant', $restaurant)
+            ->assertSet('filters.branches', [$branch])
+            ->call('applyFilters')
+            ->assertSet('filters.restaurant', $restaurant)
+            ->assertSet('filters.branches', [$branch])
+            ->call('resetFilters')
+            ->assertSet('filters.restaurant', $restaurant)
+            ->assertSet('filters.branches', [$branch]);
+    }
+
+    public function test_scope_selector_rejects_branches_outside_user_access(): void
+    {
+        $this->actingAs($this->fixture->managerA);
+        Livewire::test(ReportScopeSelector::class)
+            ->set('branches', [(string) $this->fixture->branchB->id])
+            ->assertForbidden();
+    }
+
+    public function test_branch_table_column_search_filters_and_sorting_are_applied(): void
+    {
+        $this->actingAs($this->fixture->owner);
+
+        Livewire::test(SalesKpiMatrixWidget::class)
+            ->searchTableColumns(['branch' => 'Branch A'])
+            ->assertSee('Branch A')
+            ->assertDontSee('Branch B')
+            ->sortTable('sales', 'desc')
+            ->assertSuccessful();
+    }
+
+    public function test_order_type_cards_and_table_only_include_accessible_branches(): void
+    {
+        $this->actingAs($this->fixture->managerA);
+
+        Livewire::test(OrderTypeSalesWidget::class, ['pageFilters' => [
+            'preset' => 'custom', 'from' => '2026-10-03', 'to' => '2026-10-09',
+        ]])
+            ->assertSee('Branch A')
+            ->assertDontSee('Branch B')
+            ->assertSee('المبيعات قبل المرتجعات');
     }
 
     public function test_analyst_can_open_page_and_all_widgets_render(): void

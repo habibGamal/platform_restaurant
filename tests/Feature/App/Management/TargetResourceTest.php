@@ -123,6 +123,26 @@ class TargetResourceTest extends ManagementTestCase
             ->assertCanNotSeeTableRecords([$targetB1]);
     }
 
+    public function test_restaurant_targets_create_each_metric_per_branch_without_overwriting_existing_targets(): void
+    {
+        $this->actingAs($this->ownerA);
+        $month = Carbon::now()->addMonths(2)->startOfMonth()->format('Y-m-d');
+        Target::create([
+            'organization_id' => $this->orgA->id, 'branch_id' => $this->branchA1->id,
+            'metric' => 'net_sales', 'period_month' => $month, 'value' => 99, 'distribution' => 'flat',
+        ]);
+
+        Livewire::test(ListTargets::class)->callAction('restaurantTargets', data: [
+            'restaurant_id' => $this->branchA1->restaurant_id, 'target_month' => $month,
+            'distribution' => 'flat', 'net_sales' => 1000, 'food_cost_pct' => 25,
+        ])->assertHasNoActionErrors();
+
+        $this->assertDatabaseHas('targets', ['branch_id' => $this->branchA1->id, 'metric' => 'net_sales', 'value' => 99]);
+        $this->assertDatabaseHas('targets', ['branch_id' => $this->branchA2->id, 'metric' => 'net_sales', 'value' => 1000]);
+        $this->assertDatabaseHas('targets', ['branch_id' => $this->branchA1->id, 'metric' => 'food_cost_pct', 'value' => 0.25]);
+        $this->assertDatabaseMissing('targets', ['branch_id' => $this->branchB1->id, 'period_month' => $month]);
+    }
+
     public function test_analyst_and_manager_cannot_create_targets(): void
     {
         $this->actingAs($this->analystA);

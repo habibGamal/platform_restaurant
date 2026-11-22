@@ -34,7 +34,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // MCP clients (e.g. ChatGPT) may not send "Accept: application/json"; they still need a 401 with
+        // WWW-Authenticate to start OAuth, never a redirect to the login page.
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
+            fn (Request $request) => $request->is('api/*', 'mcp/*') || $request->expectsJson(),
         );
     })->create();

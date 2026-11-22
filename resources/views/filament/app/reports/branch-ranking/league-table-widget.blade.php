@@ -1,5 +1,6 @@
 <x-filament-widgets::widget class="fi-wi-table">
     <x-filament::section heading="جدول ترتيب الفروع (League Table)">
+        <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">يقارن الجدول الفروع ذات البيانات المكتملة في الفترة المختارة، ويعرض أسباب استبعاد الفروع التي تصل إلى فحص الاكتمال أدناه. قد تُستبعد فروع مسبقاً بسبب الصلاحيات أو الفلاتر أو خيار «مقارنة نفس الفروع». جرّب فترة تتوفر لها بيانات مكتملة أو أوقف خيار مقارنة نفس الفروع إذا لم يظهر ترتيب.</p>
         @if ($singleBranchMode)
             <div class="mb-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 text-xs text-amber-800 dark:text-amber-300">
                 وضع الفرع الواحد: يتم عرض مؤشرات الأداء الخاصة بالفرع فقط دون حساب ترتيب عام.

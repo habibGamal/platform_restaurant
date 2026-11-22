@@ -41,7 +41,7 @@ class ReconciliationIssuesTableWidget extends BaseReportTableWidget
                         $this->requestResync((int) $record['id']);
                     }),
             ])
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     public function requestResync(int $issueId): void

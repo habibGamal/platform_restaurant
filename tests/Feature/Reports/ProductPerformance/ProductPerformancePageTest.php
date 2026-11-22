@@ -11,6 +11,7 @@ use App\Filament\App\Widgets\Reports\ProductPerformance\ProductParetoWidget;
 use App\Filament\App\Widgets\Reports\ProductPerformance\ProductPerformanceKpiWidget;
 use App\Filament\App\Widgets\Reports\ProductPerformance\ProductRankingTableWidget;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -42,6 +43,17 @@ class ProductPerformancePageTest extends TestCase
         Livewire::test(ProductCrossBranchMatrixWidget::class)->assertSuccessful();
         Livewire::test(ProductCategoryPerformanceWidget::class)->assertSuccessful();
         Livewire::test(ProductParetoWidget::class)->assertSuccessful();
+    }
+
+    public function test_ranking_tab_updates_the_selected_action_on_first_click(): void
+    {
+        $this->actingAs($this->fixture->owner);
+
+        Livewire::test(ProductRankingTableWidget::class)
+            ->callTableAction('tab_bottom')
+            ->assertSet('activeTab', 'bottom')
+            ->assertActionHasColor(TestAction::make('tab_bottom')->table(), 'primary')
+            ->assertSee('الأصناف الأقل مبيعاً');
     }
 
     public function test_analyst_can_open_page_and_render_all_widgets(): void

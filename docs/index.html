@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Platform Restaurants - Developer Handbook & Documentation</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="description" content="Developer handbook, architecture specifications, API interfaces, and capability guides for platform-restaurants.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+  
+  <!-- Theme stylesheet -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css">
+  
+  <style>
+    :root {
+      --theme-color: #059669;
+      --theme-color-hover: #10b981;
+      --sidebar-width: 300px;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #1f2937;
+    }
+    
+    .sidebar {
+      background-color: #f9fafb;
+      border-right: 1px solid #e5e7eb;
+    }
+    
+    .sidebar-nav strong {
+      color: #374151;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .sidebar-nav ul li a {
+      font-size: 0.92rem;
+      color: #4b5563;
+      transition: color 0.15s ease-in-out;
+    }
+    
+    .sidebar-nav ul li a:hover,
+    .sidebar-nav ul li.active > a {
+      color: var(--theme-color);
+      font-weight: 600;
+    }
+    
+    .app-name-link {
+      font-size: 1.25rem !important;
+      font-weight: 700 !important;
+      color: #065f46 !important;
+      display: flex !important;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1.5rem 1rem 0.5rem 1rem !important;
+    }
+    
+    .markdown-section {
+      max-width: 950px;
+      padding: 30px 40px 60px 40px;
+    }
+    
+    .markdown-section h1 {
+      font-size: 2.25rem;
+      font-weight: 800;
+      color: #111827;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 0.75rem;
+    }
+    
+    .markdown-section h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1f2937;
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+      border-bottom: none;
+    }
+    
+    .markdown-section h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #374151;
+    }
+    
+    .markdown-section table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #e5e7eb;
+    }
+    
+    .markdown-section th {
+      background-color: #f3f4f6;
+      color: #374151;
+      font-weight: 600;
+      text-align: left;
+      padding: 10px 14px;
+      border: 1px solid #e5e7eb;
+    }
+    
+    .markdown-section td {
+      padding: 10px 14px;
+      border: 1px solid #e5e7eb;
+    }
+    
+    .markdown-section tr:nth-child(even) {
+      background-color: #f9fafb;
+    }
+    
+    .markdown-section pre {
+      border-radius: 8px;
+      background-color: #1e293b !important;
+      padding: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .markdown-section blockquote {
+      border-left: 4px solid var(--theme-color);
+      background-color: #ecfdf5;
+      color: #065f46;
+      border-radius: 0 8px 8px 0;
+      padding: 12px 20px;
+      margin: 1.5rem 0;
+    }
+
+    /* Mermaid Wrapper & Fullscreen Controls */
+    .mermaid-wrapper {
+      position: relative;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      margin: 28px 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      overflow: hidden;
+      transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .mermaid-wrapper:hover {
+      border-color: #cbd5e1;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .mermaid-toolbar {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 10;
+      display: flex;
+      gap: 6px;
+      opacity: 0.85;
+      transition: opacity 0.15s ease;
+    }
+
+    .mermaid-wrapper:hover .mermaid-toolbar {
+      opacity: 1;
+    }
+
+    .mermaid-btn-fullscreen {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: #374151;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      backdrop-filter: blur(4px);
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .mermaid-btn-fullscreen:hover {
+      background: #059669;
+      color: #ffffff;
+      border-color: #059669;
+      box-shadow: 0 2px 6px rgba(5, 150, 105, 0.25);
+    }
+
+    .mermaid-btn-fullscreen svg {
+      stroke: currentColor;
+    }
+
+    .mermaid {
+      padding: 30px 20px 24px 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow-x: auto;
+      min-height: 80px;
+    }
+
+    .mermaid svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* Fullscreen Modal Viewer */
+    .mermaid-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 999999;
+      flex-direction: column;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+      animation: mmFadeIn 0.2s ease-out;
+    }
+
+    .mermaid-modal.active {
+      display: flex;
+    }
+
+    @keyframes mmFadeIn {
+      from { opacity: 0; transform: scale(0.98); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .mermaid-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 24px;
+      background: rgba(15, 23, 42, 0.95);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(8px);
+    }
+
+    .mermaid-modal-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .mermaid-modal-title span.badge {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    .mermaid-modal-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mm-ctrl-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 36px;
+      height: 36px;
+      padding: 0 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      gap: 6px;
+    }
+
+    .mm-ctrl-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .mm-ctrl-btn.close-btn {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+      margin-left: 8px;
+    }
+
+    .mm-ctrl-btn.close-btn:hover {
+      background: #ef4444;
+      color: #ffffff;
+    }
+
+    .mermaid-modal-viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+      background: radial-gradient(circle, #334155 1px, #0f172a 1px);
+      background-size: 20px 20px;
+    }
+
+    .mermaid-modal-viewport.dragging {
+      cursor: grabbing;
+    }
+
+    .mermaid-modal-canvas {
+      position: absolute;
+      transform-origin: center center;
+      transition: transform 0.05s ease-out;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+      padding: 36px 40px;
+      border-radius: 12px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+      border: 1px solid #e2e8f0;
+    }
+
+    .mermaid-modal-canvas svg {
+      max-width: none !important;
+      max-height: none !important;
+      height: auto;
+      display: block;
+    }
+
+    /* Mermaid Sequence Diagram Style Hardening (avoids black blobs if scoped styles get unlinked) */
+    .mermaid-modal-canvas svg .sequenceNumber,
+    .mermaid svg .sequenceNumber {
+      fill: #e0e7ff !important;
+      stroke: #6366f1 !important;
+      stroke-width: 1.5px !important;
+    }
+
+    .mermaid-modal-canvas svg text.sequenceNumber,
+    .mermaid svg text.sequenceNumber {
+      fill: #312e81 !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      text-anchor: middle !important;
+      dominant-baseline: central !important;
+    }
+
+    .mermaid-modal-canvas svg .actor,
+    .mermaid svg .actor {
+      stroke: #94a3b8 !important;
+      fill: #f8fafc !important;
+    }
+
+    .mermaid-modal-canvas svg text.actor,
+    .mermaid svg text.actor {
+      fill: #0f172a !important;
+      font-weight: 600 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    }
+
+    .mermaid-modal-canvas svg .messageLine0,
+    .mermaid-modal-canvas svg .messageLine1 {
+      stroke: #475569 !important;
+      stroke-width: 1.5px !important;
+    }
+
+    .mermaid-modal-canvas svg .messageText {
+      fill: #1e293b !important;
+      font-size: 13px !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    }
+
+    .mermaid-modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 24px;
+      font-size: 0.78rem;
+      color: #94a3b8;
+      background: rgba(15, 23, 42, 0.95);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .zoom-level-indicator {
+      color: #cbd5e1;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      min-width: 48px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">Loading documentation...</div>
+
+  <!-- Fullscreen Diagram Modal Container -->
+  <div id="mermaid-modal" class="mermaid-modal" role="dialog" aria-modal="true" aria-label="Diagram Fullscreen Viewer">
+    <div class="mermaid-modal-header">
+      <div class="mermaid-modal-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        <span>Diagram Fullscreen View</span>
+        <span class="badge">Interactive</span>
+      </div>
+      <div class="mermaid-modal-controls">
+        <button id="mm-zoom-out" class="mm-ctrl-btn" title="Zoom Out (-)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+        <span id="mm-zoom-text" class="zoom-level-indicator">100%</span>
+        <button id="mm-zoom-in" class="mm-ctrl-btn" title="Zoom In (+)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+        <button id="mm-zoom-fit" class="mm-ctrl-btn" title="Fit to Screen (0)">
+          <span>Fit</span>
+        </button>
+        <button id="mm-zoom-100" class="mm-ctrl-btn" title="Actual Size 100% (1)">
+          <span>100%</span>
+        </button>
+        <button id="mm-browser-fullscreen" class="mm-ctrl-btn" title="Toggle Native Fullscreen (F)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        </button>
+        <button id="mm-close" class="mm-ctrl-btn close-btn" title="Exit Fullscreen (Esc)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <span>Exit</span>
+        </button>
+      </div>
+    </div>
+    <div id="mm-viewport" class="mermaid-modal-viewport">
+      <div id="mm-canvas" class="mermaid-modal-canvas"></div>
+    </div>
+    <div class="mermaid-modal-footer">
+      <span>💡 Controls: <strong>Click & drag</strong> to pan • <strong>Mouse wheel</strong> to zoom • <strong>Esc</strong> to close</span>
+      <span id="mm-dimensions"></span>
+    </div>
+  </div>
+
+  <!-- Mermaid.js library -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+
+  <script>
+    // Initialize Mermaid
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      securityLevel: 'loose',
+      flowchart: { curve: 'basis' }
+    });
+
+    // Modal state
+    var modalState = {
+      active: false,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      isDragging: false,
+      dragStartX: 0,
+      dragStartY: 0
+    };
+
+    function updateModalTransform() {
+      var canvas = document.getElementById('mm-canvas');
+      var zoomText = document.getElementById('mm-zoom-text');
+      if (canvas) {
+        canvas.style.transform = 'translate(' + modalState.panX + 'px, ' + modalState.panY + 'px) scale(' + modalState.zoom + ')';
+      }
+      if (zoomText) {
+        zoomText.textContent = Math.round(modalState.zoom * 100) + '%';
+      }
+    }
+
+    function openDiagramModal(svgElement) {
+      var modal = document.getElementById('mermaid-modal');
+      var canvas = document.getElementById('mm-canvas');
+      var viewport = document.getElementById('mm-viewport');
+      var dimIndicator = document.getElementById('mm-dimensions');
+      if (!modal || !canvas || !svgElement) return;
+
+      canvas.innerHTML = '';
+      var clonedSvg = svgElement.cloneNode(true);
+      
+      // CRITICAL: Preserve id attribute so Mermaid's embedded scoped CSS rules work properly!
+      if (svgElement.id) {
+        clonedSvg.id = svgElement.id;
+      }
+      clonedSvg.style.maxWidth = 'none';
+      clonedSvg.style.height = 'auto';
+      canvas.appendChild(clonedSvg);
+
+      modal.classList.add('active');
+      modalState.active = true;
+      document.body.style.overflow = 'hidden';
+
+      // Auto fit diagram within viewport
+      setTimeout(function() {
+        var rect = svgElement.getBoundingClientRect();
+        var vw = (viewport.clientWidth || window.innerWidth) - 100;
+        var vh = (viewport.clientHeight || window.innerHeight) - 150;
+        var svgW = rect.width || 800;
+        var svgH = rect.height || 500;
+        
+        var scaleW = vw / svgW;
+        var scaleH = vh / svgH;
+        var fitScale = Math.min(scaleW, scaleH);
+        
+        // Fit cleanly without blowing up small diagrams
+        modalState.zoom = Math.min(Math.max(fitScale, 0.25), 1.0);
+        modalState.panX = 0;
+        modalState.panY = 0;
+        updateModalTransform();
+
+        if (dimIndicator) {
+          dimIndicator.textContent = Math.round(svgW) + ' × ' + Math.round(svgH) + ' px';
+        }
+      }, 20);
+    }
+
+    function closeDiagramModal() {
+      var modal = document.getElementById('mermaid-modal');
+      if (modal) {
+        modal.classList.remove('active');
+      }
+      modalState.active = false;
+      document.body.style.overflow = '';
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(function() {});
+      }
+    }
+
+    // Setup modal event listeners
+    document.addEventListener('DOMContentLoaded', function() {
+      var modal = document.getElementById('mermaid-modal');
+      var viewport = document.getElementById('mm-viewport');
+      var btnZoomIn = document.getElementById('mm-zoom-in');
+      var btnZoomOut = document.getElementById('mm-zoom-out');
+      var btnZoomFit = document.getElementById('mm-zoom-fit');
+      var btnZoom100 = document.getElementById('mm-zoom-100');
+      var btnClose = document.getElementById('mm-close');
+      var btnBrowserFullscreen = document.getElementById('mm-browser-fullscreen');
+
+      if (btnZoomIn) {
+        btnZoomIn.addEventListener('click', function() {
+          modalState.zoom = Math.min(modalState.zoom * 1.25, 4.0);
+          updateModalTransform();
+        });
+      }
+
+      if (btnZoomOut) {
+        btnZoomOut.addEventListener('click', function() {
+          modalState.zoom = Math.max(modalState.zoom * 0.8, 0.15);
+          updateModalTransform();
+        });
+      }
+
+      if (btnZoomFit) {
+        btnZoomFit.addEventListener('click', function() {
+          var canvas = document.getElementById('mm-canvas');
+          var svg = canvas.querySelector('svg');
+          if (!svg) return;
+          var rect = svg.getBoundingClientRect();
+          var vw = (viewport.clientWidth || window.innerWidth) - 100;
+          var vh = (viewport.clientHeight || window.innerHeight) - 150;
+          var svgW = (rect.width / modalState.zoom) || 800;
+          var svgH = (rect.height / modalState.zoom) || 500;
+          var fitScale = Math.min(vw / svgW, vh / svgH);
+          modalState.zoom = Math.min(Math.max(fitScale, 0.25), 1.0);
+          modalState.panX = 0;
+          modalState.panY = 0;
+          updateModalTransform();
+        });
+      }
+
+      if (btnZoom100) {
+        btnZoom100.addEventListener('click', function() {
+          modalState.zoom = 1;
+          modalState.panX = 0;
+          modalState.panY = 0;
+          updateModalTransform();
+        });
+      }
+
+      if (btnBrowserFullscreen) {
+        btnBrowserFullscreen.addEventListener('click', function() {
+          if (!document.fullscreenElement) {
+            modal.requestFullscreen().catch(function() {});
+          } else {
+            document.exitFullscreen().catch(function() {});
+          }
+        });
+      }
+
+      if (btnClose) {
+        btnClose.addEventListener('click', closeDiagramModal);
+      }
+
+      // Drag to pan
+      if (viewport) {
+        viewport.addEventListener('mousedown', function(e) {
+          if (e.button !== 0) return; // Only left mouse button
+          modalState.isDragging = true;
+          modalState.dragStartX = e.clientX - modalState.panX;
+          modalState.dragStartY = e.clientY - modalState.panY;
+          viewport.classList.add('dragging');
+        });
+
+        window.addEventListener('mousemove', function(e) {
+          if (!modalState.isDragging) return;
+          modalState.panX = e.clientX - modalState.dragStartX;
+          modalState.panY = e.clientY - modalState.dragStartY;
+          updateModalTransform();
+        });
+
+        window.addEventListener('mouseup', function() {
+          if (modalState.isDragging) {
+            modalState.isDragging = false;
+            viewport.classList.remove('dragging');
+          }
+        });
+
+        // Mouse wheel zoom
+        viewport.addEventListener('wheel', function(e) {
+          e.preventDefault();
+          var factor = e.deltaY < 0 ? 1.1 : 0.9;
+          modalState.zoom = Math.min(Math.max(0.15, modalState.zoom * factor), 4.0);
+          updateModalTransform();
+        }, { passive: false });
+      }
+
+      // Keyboard shortcuts
+      window.addEventListener('keydown', function(e) {
+        if (!modalState.active) return;
+        if (e.key === 'Escape') {
+          closeDiagramModal();
+        } else if (e.key === '+' || e.key === '=') {
+          modalState.zoom = Math.min(modalState.zoom * 1.25, 4.0);
+          updateModalTransform();
+        } else if (e.key === '-' || e.key === '_') {
+          modalState.zoom = Math.max(modalState.zoom * 0.8, 0.15);
+          updateModalTransform();
+        } else if (e.key === '0') {
+          if (btnZoomFit) btnZoomFit.click();
+        } else if (e.key === '1') {
+          if (btnZoom100) btnZoom100.click();
+        } else if (e.key === 'f' || e.key === 'F') {
+          if (!document.fullscreenElement) {
+            modal.requestFullscreen().catch(function() {});
+          } else {
+            document.exitFullscreen().catch(function() {});
+          }
+        }
+      });
+    });
+
+    window.$docsify = {
+      name: 'Platform Restaurants',
+      repo: '',
+      loadSidebar: true,
+      alias: {
+        '/.*/_sidebar.md': '/_sidebar.md',
+      },
+      subMaxLevel: 2,
+      auto2top: true,
+      homepage: 'README.md',
+      
+      // Full text search plugin
+      search: {
+        maxAge: 86400000,
+        paths: 'auto',
+        placeholder: 'Search documentation...',
+        noData: 'No results found',
+        depth: 4
+      },
+
+      // Custom Markdown renderer for Mermaid code fences with Fullscreen Toolbar
+      markdown: {
+        renderer: {
+          code: function(code, lang) {
+            if (lang === 'mermaid') {
+              return '<div class="mermaid-wrapper">' +
+                '<div class="mermaid-toolbar">' +
+                  '<button type="button" class="mermaid-btn-fullscreen" title="Open full screen diagram viewer">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>' +
+                    '<span>Full Screen</span>' +
+                  '</button>' +
+                '</div>' +
+                '<div class="mermaid">' + code + '</div>' +
+              '</div>';
+            }
+            return this.origin.code.apply(this, arguments);
+          }
+        }
+      },
+
+      plugins: [
+        function(hook, vm) {
+          hook.doneEach(function() {
+            var diagrams = document.querySelectorAll('.mermaid');
+            if (diagrams.length > 0) {
+              mermaid.run({
+                querySelector: '.mermaid'
+              }).then(function() {
+                // Attach click listeners to fullscreen buttons after Mermaid renders
+                document.querySelectorAll('.mermaid-wrapper').forEach(function(wrapper) {
+                  var btn = wrapper.querySelector('.mermaid-btn-fullscreen');
+                  var svg = wrapper.querySelector('.mermaid svg');
+                  if (btn && svg) {
+                    btn.onclick = function() {
+                      openDiagramModal(svg);
+                    };
+                  }
+                });
+              }).catch(function(err) {
+                console.warn('Mermaid rendering issue:', err);
+              });
+            }
+          });
+        }
+      ]
+    };
+  </script>
+
+  <!-- Docsify Core -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
+  <!-- Full text search plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+  <!-- Copy to clipboard plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2/dist/docsify-copy-code.min.js"></script>
+  <!-- Prism language highlighters -->
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-php.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-typescript.min.js"></script>
+</body>
+</html>

@@ -20,7 +20,7 @@ class FoodCostBranchMatrixWidget extends BaseReportTableWidget
         return parent::table($table)
             ->heading('مصفوفة مؤشرات التكلفة والهالك لكل فرع')
             ->description('مقارنة نسب تكلفة الخامات والهالك وعجز الجرد لكل فرع مقابل النطاق المستهدف (28% - 35%)')
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     protected function getReportRecords(): ?Closure

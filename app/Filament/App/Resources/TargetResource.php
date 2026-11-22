@@ -120,6 +120,7 @@ class TargetResource extends Resource
                     }),
                 Forms\Components\Select::make('distribution')
                     ->label('طريقة التوزيع')
+                    ->hintIcon('heroicon-m-question-mark-circle', tooltip: 'بالتساوي: يقسم الهدف على أيام الفرع المؤهلة في الشهر. حسب أيام الأسبوع: يستخدم نمط مبيعات آخر 8 أسابيع كاملة بعد استبعاد المناسبات، ويعود للتوزيع المتساوي إذا لم تتوفر بيانات كافية.')
                     ->options([
                         'weekday_weights' => 'حسب أيام الأسبوع',
                         'flat' => 'بالتساوي',

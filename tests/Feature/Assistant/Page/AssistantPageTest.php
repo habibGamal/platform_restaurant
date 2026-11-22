@@ -39,6 +39,7 @@ class AssistantPageTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['assistant.react_ui' => false]);
         (new RolesAndPermissionsSeeder)->run();
 
         Filament::setCurrentPanel(Filament::getPanel('app'));

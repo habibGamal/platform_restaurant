@@ -89,6 +89,14 @@ trait UsesReportFilters
         $today = CarbonImmutable::now($timezone)->startOfDay();
 
         $query = $args;
+        // ReportFilters reads from/to only under preset=custom and otherwise falls back to "today", so a model
+        // that sends dates without the preset would silently get today's (often empty) data. Dates win here,
+        // and an omitted period is month to date, as the schema tells the model.
+        if (empty($args['preset'])) {
+            $query['preset'] = ! empty($args['from']) && ! empty($args['to'])
+                ? PeriodPreset::custom->value
+                : PeriodPreset::this_month->value;
+        }
         if (array_key_exists('like_for_like', $args)) {
             $query['lfl'] = $args['like_for_like'];
         }

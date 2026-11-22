@@ -8,6 +8,7 @@ use App\Domain\Metrics\MetricsQuery;
 use App\Domain\Metrics\Reports\FoodCostWasteReport;
 use App\Filament\App\Widgets\Reports\BaseReportChartWidget;
 use App\Models\User;
+use Filament\Support\RawJs;
 
 class FoodCostTrendChartWidget extends BaseReportChartWidget
 {
@@ -16,6 +17,11 @@ class FoodCostTrendChartWidget extends BaseReportChartWidget
     protected function getType(): string
     {
         return 'line';
+    }
+
+    protected function getOptions(): RawJs
+    {
+        return $this->percentageOptions();
     }
 
     protected function getData(): array

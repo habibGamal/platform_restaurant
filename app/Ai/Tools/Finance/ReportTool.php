@@ -62,7 +62,7 @@ abstract class ReportTool implements ReportsProgress, Tool
 
             return $this->formatEnvelope(
                 $filters->period, $filters->comparison, $branchMap, $this->compact($metrics, $branchMap, $nameAliases),
-                $this->buildCompleteness($query, $period, $branchMap), [],
+                $this->buildCompleteness($query, $period, $branchMap), $this->definitions(),
                 ['الصفوف المعروضة لا تتجاوز 10 لكل قائمة.'],
                 preset: $filters->preset, comparisonMode: $filters->comparisonMode,
                 summary: $this->summarize($metrics, count($branchIds)),
@@ -93,6 +93,19 @@ abstract class ReportTool implements ReportsProgress, Tool
     {
         return "جهزت التقرير من بيانات {$branchCount} فروع للفترة المحددة.";
     }
+
+    /**
+     * Meaning of fields the model is likely to misread, sent with every result.
+     *
+     * @return array<string, string>
+     */
+    protected function definitions(): array
+    {
+        return [];
+    }
+
+    /** Shared wording for the stock-count field, whose sign is the opposite of what its name suggests to models. */
+    protected const INVENTORY_VARIANCE_DEFINITION = 'Stock-count difference valued at cost. Positive = shortage (عجز جرد), a loss that lowers profit. Negative = surplus (زيادة جرد), stock found above the books, which raises profit; a large negative value usually means a counting or recording error, not real performance.';
 
     /** @param array<string, mixed> $metrics */
     protected function completenessPeriod(MetricsQuery $query, array $metrics): Period

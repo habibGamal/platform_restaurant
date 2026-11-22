@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace App\Filament\App\Pages;
 
 use App\Domain\Assistant\AssistantEvent;
-use App\Domain\Assistant\AssistantReadiness;
+use App\Domain\Assistant\AssistantHome;
 use App\Domain\Assistant\AssistantReadinessResult;
-use App\Domain\Assistant\AssistantService;
-use App\Domain\Assistant\AssistantStreamEvents;
 use App\Domain\Assistant\Channel;
 use App\Domain\Assistant\Contracts\Assistant as AssistantContract;
 use App\Domain\Assistant\ConversationGuard;
 use App\Domain\Assistant\RunLog;
+use App\Domain\Assistant\Ui\AnswerText;
+use App\Domain\Assistant\Ui\MessagePartsRepository;
 use App\Filament\App\Pages\Management\AiSettingsPage;
 use App\Models\AiConversationMeta;
 use App\Models\AiRunEvent;
@@ -99,13 +99,7 @@ class Assistant extends Page
     public array $messages = [];
 
     /** The coordinator never sends its own label; specialists normally do (agent_started text). */
-    private const AGENT_LABELS = [
-        'assistant' => 'المساعد',
-        'marketing' => 'التسويق',
-        'finance' => 'المالية',
-        'operations' => 'التشغيل',
-        'data_checker' => 'مدقق البيانات',
-    ];
+    public const array AGENT_LABELS = MessagePartsRepository::AGENT_LABELS;
 
     /** No worker has written a row for the run yet after this many seconds: say it is queued. */
     private const QUEUE_WAIT_NOTICE_SECONDS = 60;
@@ -138,6 +132,12 @@ class Assistant extends Page
     public function mount(?string $conversation = null): void
     {
         abort_unless(static::canAccess(), 403);
+
+        if ((bool) config('assistant.react_ui', true)) {
+            $this->redirect(route('assistant'));
+
+            return;
+        }
 
         if ($conversation !== null) {
             /** @var User|null $user */
@@ -454,51 +454,7 @@ class Assistant extends Page
      */
     protected function reduceWorkLog(array $log, string $type, array $payload): array
     {
-        $text = is_string($payload['text'] ?? null) ? trim($payload['text']) : '';
-
-        if ($type === 'plan') {
-            $log['plan'] = $text !== '' ? $text : $log['plan'];
-
-            return $log;
-        }
-        if ($type === 'done' || $type === 'error') {
-            return $this->finishWorkLog($log, $type === 'done' ? 'done' : 'failed');
-        }
-
-        $agent = is_string($payload['agent'] ?? null) ? $payload['agent'] : null;
-        if ($agent === null || ! in_array($type, ['agent_started', 'step_started', 'step_finished', 'agent_finished'], true)) {
-            return $log;
-        }
-
-        $index = array_search($agent, array_column($log['agents'], 'agent'), true);
-        if ($index === false) {
-            $log['agents'][] = ['agent' => $agent, 'label' => self::AGENT_LABELS[$agent] ?? $agent, 'status' => 'running', 'step' => null, 'findings' => [], 'steps' => 0];
-            $index = array_key_last($log['agents']);
-        }
-        $row = $log['agents'][$index];
-
-        if ($type === 'agent_started') {
-            $row['status'] = 'running';
-            if ($agent !== 'assistant' && $text !== '') {
-                $row['label'] = $text;
-            }
-        } elseif ($type === 'step_started') {
-            $row['status'] = 'running';
-            $row['step'] = $text !== '' ? $text : null;
-            $row['steps']++;
-        } elseif ($type === 'step_finished') {
-            $row['step'] = null;
-            if ($text !== '') {
-                $row['findings'][] = $text;
-            }
-        } else {
-            $row['status'] = ($payload['failed'] ?? false) === true ? 'failed' : 'done';
-            $row['step'] = null;
-        }
-
-        $log['agents'][$index] = $row;
-
-        return $log;
+        return MessagePartsRepository::foldWorkLog([['type' => $type, 'payload' => $payload]], $log);
     }
 
     /**
@@ -509,14 +465,7 @@ class Assistant extends Page
      */
     protected function finishWorkLog(array $log, string $status): array
     {
-        foreach ($log['agents'] as $i => $agent) {
-            if ($agent['status'] === 'running') {
-                $log['agents'][$i]['status'] = $status;
-                $log['agents'][$i]['step'] = null;
-            }
-        }
-
-        return $log;
+        return MessagePartsRepository::finishWorkLog($log, $status);
     }
 
     /**
@@ -635,40 +584,14 @@ class Assistant extends Page
      */
     private function storedAnswerText(string $content): string
     {
-        return AssistantStreamEvents::containsPrintedToolCall($content)
-            ? AssistantService::MALFORMED_REPLY_AR
-            : AssistantStreamEvents::withoutPlanLines($content);
+        return AnswerText::clean($content);
     }
 
     protected function mapToolStatus(string $toolName): string
     {
-        return match ($toolName) {
-            'get_kpis' => '⏳ بحسب المؤشرات…',
-            'get_kpi_series' => '⏳ بحلل الاتجاهات…',
-            'query_metrics' => '⏳ بستعلم عن البيانات…',
-            'overview_report' => '⏳ بجهز التقرير الشامل…',
-            'sales_comparison' => '⏳ بقارن المبيعات…',
-            'profitability' => '⏳ بحلل الربحية…',
-            'food_cost_waste' => '⏳ بحسب تكلفة الخامات والهالك…',
-            'product_performance' => '⏳ بحلل أداء الأصناف…',
-            'shifts_weekdays' => '⏳ بحلل الورديات والأيام…',
-            'branch_ranking' => '⏳ برتب الفروع…',
-            'targets_status' => '⏳ بفحص المستهدفات…',
-            'expenses_purchases' => '⏳ براجع المصروفات والمشتريات…',
-            'data_health' => '⏳ بفحص صحة البيانات…',
-            'analyze_growth' => '⏳ بحلل النمو…',
-            'detect_anomalies' => '⏳ بفحص التغيرات غير المعتادة…',
-            'analyze_profit_contribution' => '⏳ بحلل مساهمة الأرباح…',
-            'analyze_cost_ratios' => '⏳ بحلل نسب التكاليف…',
-            'forecast_sales' => '⏳ بحسب التوقعات…',
-            'forecast_material_needs' => '⏳ بتوقع احتياجات المواد…',
-            'menu_engineering' => '⏳ بهندس قائمة الطعام…',
-            'get_workspace_context' => '⏳ بجهز سياق العمل…',
-            'resolve_period' => '⏳ بحدد الفترة الزمنية…',
-            'find_branches' => '⏳ ببحث عن الفروع…',
-            'search_products' => '⏳ ببحث عن الأصناف…',
-            default => '⏳ بجهز البيانات…',
-        };
+        $labels = AssistantHome::toolLabels();
+
+        return $labels[$toolName] ?? ($labels['default'] ?? '⏳ بجهز البيانات…');
     }
 
     /**
@@ -724,13 +647,10 @@ class Assistant extends Page
      */
     public function getReadiness(): ?AssistantReadinessResult
     {
-        $organization = auth()->user()?->organization;
+        /** @var User|null $user */
+        $user = auth()->user();
 
-        if ($organization === null || ! class_exists(AssistantReadiness::class)) {
-            return null;
-        }
-
-        return app(AssistantReadiness::class)->check($organization);
+        return $user !== null ? AssistantHome::readinessResult($user) : null;
     }
 
     public function canManageAssistant(): bool
@@ -747,10 +667,10 @@ class Assistant extends Page
 
     public function getGreeting(): string
     {
-        $name = Str::of((string) auth()->user()?->name)->trim()->before(' ')->toString();
-        $greeting = now()->hour < 12 ? 'صباح الخير' : 'مساء الخير';
+        /** @var User|null $user */
+        $user = auth()->user();
 
-        return $name !== '' ? "{$greeting}، {$name}" : $greeting;
+        return $user !== null ? AssistantHome::greeting($user) : (now()->hour < 12 ? 'صباح الخير' : 'مساء الخير');
     }
 
     /**
@@ -758,24 +678,7 @@ class Assistant extends Page
      */
     public function getStarterPrompts(): array
     {
-        /** @var User|null $user */
-        $user = auth()->user();
-
-        if ($user !== null && $user->hasRole('branch_manager')) {
-            return [
-                'ليه مبيعات فرعي نزلت الأسبوع ده؟',
-                'إيه أكتر 5 أصناف مبيعاً في الفرع؟',
-                'هل هنحقق مستهدف الفرع الشهر ده؟',
-                'توقع مبيعات الفرع لآخر الشهر',
-            ];
-        }
-
-        return [
-            'ليه مبيعات فرع المعادي نزلت الأسبوع ده؟',
-            'إيه أكتر 5 أصناف بتخسر؟',
-            'هنحقق المستهدف الشهر ده؟',
-            'توقع المبيعات لآخر الشهر',
-        ];
+        return AssistantHome::starterPrompts(auth()->user());
     }
 
     public function renderMarkdown(?string $content): string

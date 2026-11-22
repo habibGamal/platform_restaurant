@@ -57,42 +57,29 @@ class ProductRankingTableWidget extends BaseReportTableWidget
 
     public function table(Table $table): Table
     {
-        $records = $this->getReportRecords();
-
-        if ($records !== null) {
-            $table->records($records);
-        }
-
-        $headingText = match ($this->activeTab) {
-            'bottom' => 'الأصناف الأقل مبيعاً (تستبعد غير المباعة)',
-            'unsold' => 'أصناف لم تُبَع (نشطة في قائمة الطعام)',
-            default => 'الأصناف الأكثر مبيعاً (Top '.$this->limit.')',
-        };
-
-        $metricLabel = match ($this->rankBy) {
-            'qty' => 'الكمية',
-            'gross_profit' => 'مجمل الربح',
-            'margin_pct' => 'هامش الربح',
-            default => 'صافي المبيعات',
-        };
+        $table = parent::table($table);
 
         return $table
-            ->heading($headingText)
-            ->description("مرتبة حسب: {$metricLabel}")
+            ->heading(fn (): string => match ($this->activeTab) {
+                'bottom' => 'الأصناف الأقل مبيعاً (تستبعد غير المباعة)',
+                'unsold' => 'أصناف لم تُبَع (نشطة في قائمة الطعام)',
+                default => 'الأصناف الأكثر مبيعاً (Top '.$this->limit.')',
+            })
+            ->description(fn (): string => 'مرتبة حسب: '.$this->rankByLabel())
             ->headerActions([
                 Action::make('tab_top')
                     ->label('الأكثر مبيعاً')
-                    ->color($this->activeTab === 'top' ? 'primary' : 'gray')
+                    ->color(fn (): string => $this->activeTab === 'top' ? 'primary' : 'gray')
                     ->action(fn () => $this->setTab('top')),
 
                 Action::make('tab_bottom')
                     ->label('الأقل مبيعاً')
-                    ->color($this->activeTab === 'bottom' ? 'primary' : 'gray')
+                    ->color(fn (): string => $this->activeTab === 'bottom' ? 'primary' : 'gray')
                     ->action(fn () => $this->setTab('bottom')),
 
                 Action::make('tab_unsold')
                     ->label('لم يُبع')
-                    ->color($this->activeTab === 'unsold' ? 'primary' : 'gray')
+                    ->color(fn (): string => $this->activeTab === 'unsold' ? 'primary' : 'gray')
                     ->action(fn () => $this->setTab('unsold')),
 
                 ActionGroup::make([
@@ -113,7 +100,7 @@ class ProductRankingTableWidget extends BaseReportTableWidget
                         ->icon($this->rankBy === 'margin_pct' ? 'heroicon-m-check' : null)
                         ->action(fn () => $this->setRankBy('margin_pct')),
                 ])
-                    ->label("الترتيب: {$metricLabel}")
+                    ->label(fn (): string => 'الترتيب: '.$this->rankByLabel())
                     ->icon('heroicon-m-arrows-up-down')
                     ->color('gray'),
 
@@ -122,19 +109,20 @@ class ProductRankingTableWidget extends BaseReportTableWidget
                     Action::make('limit_20')->label('أفضل 20')->action(fn () => $this->setLimit(20)),
                     Action::make('limit_50')->label('أفضل 50')->action(fn () => $this->setLimit(50)),
                 ])
-                    ->label("العدد: {$this->limit}")
+                    ->label(fn (): string => 'العدد: '.$this->limit)
                     ->icon('heroicon-m-list-bullet')
                     ->color('gray'),
 
                 ActionGroup::make($this->getCategoryActions())
-                    ->label($this->getSelectedCategoryLabel())
+                    ->label(fn (): string => $this->getSelectedCategoryLabel())
                     ->icon('heroicon-m-tag')
-                    ->color($this->categoryUuid !== null ? 'primary' : 'gray'),
+                    ->dropdownMaxHeight('20rem')
+                    ->color(fn (): string => $this->categoryUuid !== null ? 'primary' : 'gray'),
 
                 Action::make('toggle_legacy')
                     ->label(fn () => $this->includeLegacy ? 'استبعاد المؤرشفة' : 'شمل المؤرشفة')
                     ->icon('heroicon-m-archive-box')
-                    ->color($this->includeLegacy ? 'warning' : 'gray')
+                    ->color(fn (): string => $this->includeLegacy ? 'warning' : 'gray')
                     ->action(fn () => $this->toggleLegacy()),
             ])
             ->actions([
@@ -146,8 +134,17 @@ class ProductRankingTableWidget extends BaseReportTableWidget
                     ->modalContent(fn (array $record): View => view('filament.app.reports.product-performance.item-detail', [
                         'detail' => $this->getItemDetail($record['product_ref'] ?? $record['product_uuid'] ?? $record['item_key'] ?? ''),
                     ])),
-            ])
-            ->columns($this->getReportColumns());
+            ]);
+    }
+
+    private function rankByLabel(): string
+    {
+        return match ($this->rankBy) {
+            'qty' => 'الكمية',
+            'gross_profit' => 'مجمل الربح',
+            'margin_pct' => 'هامش الربح',
+            default => 'صافي المبيعات',
+        };
     }
 
     public function getItemDetail(string $key): ?ProductDetailSummary

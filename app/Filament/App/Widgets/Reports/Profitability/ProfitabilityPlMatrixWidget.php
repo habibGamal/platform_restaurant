@@ -29,6 +29,8 @@ class ProfitabilityPlMatrixWidget extends BaseReportViewWidget
 
     protected ?string $heading = 'قائمة الدخل ومصفوفة الأرباح (P&L Matrix)';
 
+    protected bool $hasTableSearchAndSorting = false;
+
     public string $laborBasis = 'paid';
 
     public bool $excludeInventoryVariance = false;

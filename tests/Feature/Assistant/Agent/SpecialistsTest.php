@@ -38,7 +38,7 @@ final class SpecialistsTest extends TestCase
 
     /** @var array<class-string, list<string>> */
     private const TOOLS = [
-        MarketingSpecialist::class => ['resolve_period', 'find_branches', 'menu_engineering', 'bought_together', 'combo_builder', 'item_trends', 'item_timing', 'get_kpis', 'query_metrics'],
+        MarketingSpecialist::class => ['resolve_period', 'find_branches', 'menu_engineering', 'bought_together', 'combo_builder', 'item_trends', 'item_timing', 'get_kpis', 'query_metrics', 'rank_items', 'get_item_card', 'get_combo_candidates', 'get_affinities'],
         FinanceSpecialist::class => ['resolve_period', 'find_branches', 'get_kpis', 'get_kpi_series', 'profitability', 'food_cost_waste', 'expenses_purchases', 'sales_comparison', 'targets_vs_actual', 'sales_forecast'],
         OperationsSpecialist::class => ['resolve_period', 'find_branches', 'get_kpis', 'branch_ranking', 'shifts_weekdays', 'overview_report', 'peak_hours', 'data_health', 'targets_vs_actual'],
         DataChecker::class => ['data_health'],

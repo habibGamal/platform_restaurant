@@ -68,6 +68,12 @@ return [
     'timezone' => env('APP_TIMEZONE', 'Africa/Cairo'),
 
     /*
+    | Proxies whose X-Forwarded-* headers are trusted ("*" or comma-separated IPs/CIDRs), e.g. behind
+    | Cloudflare Tunnel so the remote MCP server's OAuth metadata advertises https URLs. Empty = none.
+    */
+    'trusted_proxies' => env('TRUSTED_PROXIES'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------

@@ -8,6 +8,7 @@ use App\Domain\Metrics\MetricsQuery;
 use App\Domain\Metrics\Reports\ProfitabilityReport;
 use App\Filament\App\Widgets\Reports\BaseReportChartWidget;
 use App\Models\User;
+use Filament\Support\RawJs;
 
 class MarginLeakageChartWidget extends BaseReportChartWidget
 {
@@ -39,9 +40,9 @@ class MarginLeakageChartWidget extends BaseReportChartWidget
     /**
      * @return array<string, mixed>
      */
-    protected function getOptions(): array
+    protected function getOptions(): RawJs
     {
-        return [
+        return $this->percentageOptions([
             'scales' => [
                 'x' => [
                     'stacked' => true,
@@ -61,6 +62,6 @@ class MarginLeakageChartWidget extends BaseReportChartWidget
                     'position' => 'bottom',
                 ],
             ],
-        ];
+        ]);
     }
 }

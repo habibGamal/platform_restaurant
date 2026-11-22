@@ -18,6 +18,8 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\Fixtures\TwoBranchesTwoWeeks;
 use Tests\TestCase;
@@ -54,6 +56,27 @@ class PageTest extends TestCase
         Livewire::test(SupplierSummaryTableWidget::class)->assertSuccessful();
         Livewire::test(PurchasesVsCogsWidget::class)->assertSuccessful();
         Livewire::test(ExpenseListTableWidget::class)->assertSuccessful();
+    }
+
+    public function test_expense_table_paginates_and_searches_all_matching_database_rows(): void
+    {
+        $this->actingAs($this->fixture->owner);
+        $template = (array) DB::table('wh_expenses')->where('branch_id', $this->fixture->branchA->id)->first();
+        unset($template['id']);
+        $rows = [];
+        for ($i = 0; $i < 205; $i++) {
+            $rows[] = array_merge($template, ['uuid' => (string) Str::uuid(), 'notes' => 'unique expense '.$i]);
+        }
+        DB::table('wh_expenses')->insert($rows);
+
+        $table = Livewire::test(ExpenseListTableWidget::class, ['pageFilters' => [
+            'preset' => 'custom', 'from' => '2026-10-03', 'to' => '2026-10-16',
+        ]]);
+        $this->assertGreaterThan(200, $table->instance()->getTableRecords()->total());
+        $this->assertCount(15, $table->instance()->getTableRecords()->items());
+        $table->searchTableColumns(['notes' => 'unique expense 204'])
+            ->assertSee('unique expense 204')
+            ->assertDontSee('unique expense 203');
     }
 
     public function test_analyst_can_open_page_and_render_all_widgets(): void

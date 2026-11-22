@@ -24,7 +24,7 @@ class PurchasesPerBranchWidget extends BaseReportTableWidget
         return parent::table($table)
             ->heading('المشتريات لكل فرع (Purchases per Branch)')
             ->description('إجمالي فواتير الشراء والمرتجعات وصافي المشتريات (K20) والاتجاه الأسبوعي لكل فرع')
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     protected function getReportRecords(): ?Closure

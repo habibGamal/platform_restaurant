@@ -32,6 +32,8 @@ abstract class BaseReportViewWidget extends Widget implements HasActions, HasSch
 
     protected ?string $heading = null;
 
+    protected bool $hasTableSearchAndSorting = true;
+
     public function getHeading(): ?string
     {
         return $this->heading;
@@ -65,11 +67,21 @@ abstract class BaseReportViewWidget extends Widget implements HasActions, HasSch
 
     public function table(Table $table): Table
     {
+        $columns = $this->getTableColumnsForRecords();
+        foreach ($columns as $column) {
+            if ($column instanceof TextColumn) {
+                $column->sortable($this->hasTableSearchAndSorting)
+                    ->searchable($this->hasTableSearchAndSorting)
+                    ->toggleable();
+            }
+        }
+
         return $table
             ->heading($this->getHeading())
-            ->records(fn (): array => $this->getRows())
-            ->columns($this->getTableColumnsForRecords())
-            ->paginated(false)
+            ->description($this->hasTableSearchAndSorting ? 'استخدم البحث والترتيب لاختيار السجلات والأعمدة التي تريد عرضها.' : null)
+            ->records(fn (array $columnSearches, ?string $search, ?string $sortColumn, ?string $sortDirection, int|string $page, int|string|null $recordsPerPage) => ArrayTableRecords::paginate($this->getRows(), $columnSearches, $search, $sortColumn, $sortDirection, (int) $page, (int) ($recordsPerPage ?: 15)))
+            ->columns($columns)
+            ->paginated([15, 30, 50, 100])
             ->emptyStateHeading('لا توجد بيانات متاحة')
             ->emptyStateDescription(null);
     }
@@ -85,6 +97,9 @@ abstract class BaseReportViewWidget extends Widget implements HasActions, HasSch
             $columns[] = TextColumn::make($key)
                 ->label($label)
                 ->html()
+                ->sortable()
+                // ->searchable(isIndividual: true)
+                ->toggleable()
                 ->placeholder('—')
                 ->extraHeaderAttributes(['class' => 'whitespace-nowrap'])
                 ->extraCellAttributes(['class' => 'whitespace-nowrap']);

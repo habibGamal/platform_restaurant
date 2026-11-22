@@ -24,6 +24,8 @@ class CategoryBranchMatrixWidget extends BaseReportViewWidget
 
     protected ?string $heading = 'مصفوفة المصروفات حسب التصنيف والفروع';
 
+    protected bool $hasTableSearchAndSorting = false;
+
     public function table(Table $table): Table
     {
         return parent::table($table)

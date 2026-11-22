@@ -8,6 +8,7 @@ use App\Ai\Agents\RestaurantAnalyst;
 use App\Domain\AiBilling\BudgetExceededException;
 use App\Domain\AiBilling\BudgetGuard;
 use App\Domain\Assistant\Contracts\Assistant;
+use App\Domain\Assistant\Ui\AnswerText;
 use App\Jobs\RunAssistantQuestion;
 use App\Models\AiConversationMeta;
 use App\Models\AiRunEvent;
@@ -54,7 +55,7 @@ final class AssistantService implements Assistant
             return;
         }
 
-        $conversationId ??= $this->startConversation($user, $channel, $text);
+        $conversationId ??= $this->createConversation($user, $channel, AnswerText::titleFromText($text));
 
         yield from $this->runStream($user, $channel, $conversationId, $text, $runId);
     }
@@ -79,7 +80,7 @@ final class AssistantService implements Assistant
             return $conversationId;
         }
 
-        $conversationId ??= $this->startConversation($user, $channel, $text);
+        $conversationId ??= $this->createConversation($user, $channel, AnswerText::titleFromText($text));
 
         RunAssistantQuestion::dispatch($user->id, $channel->value, $conversationId, $text, $runId);
 
@@ -182,7 +183,7 @@ final class AssistantService implements Assistant
             );
         }
 
-        $conversationId ??= $this->startConversation($user, $channel, $text);
+        $conversationId ??= $this->createConversation($user, $channel, AnswerText::titleFromText($text));
 
         $agent = (new RestaurantAnalyst($user, $channel))->continue($conversationId, as: $user);
 
@@ -325,18 +326,20 @@ final class AssistantService implements Assistant
      * The SDK only creates its conversation row when an agent starts without an id, so a
      * conversation we name up front must be stored here, or its messages would point at nothing.
      */
-    private function startConversation(User $user, Channel $channel, string $text): string
+    public function createConversation(User $user, Channel $channel, ?string $title = null): string
     {
-        $title = Str::limit(trim(preg_replace('/\s+/u', ' ', $text) ?? $text), 80, '…');
+        $resolvedTitle = ($title !== null && trim($title) !== '')
+            ? trim($title)
+            : 'محادثة جديدة';
 
         $conversationId = app(ConversationStore::class)->storeConversation(
             Conversation::participantType($user),
             Conversation::participantKey($user),
-            $title !== '' ? $title : 'محادثة جديدة',
+            $resolvedTitle,
             (string) Str::uuid7(),
         );
 
-        $this->conversationGuard->register($conversationId, $user, $channel, $title !== '' ? $title : null);
+        $this->conversationGuard->register($conversationId, $user, $channel, $resolvedTitle);
 
         return $conversationId;
     }

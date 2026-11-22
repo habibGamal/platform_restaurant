@@ -24,7 +24,7 @@ class ExpensesVsSalesGrowthWidget extends BaseReportTableWidget
         return parent::table($table)
             ->heading('مقارنة نمو المصروفات مقابل نمو المبيعات')
             ->description('مقارنة معدل نمو المصروفات (K11) مقابل معدل نمو المبيعات (K06) لكل فرع للكشف المبكر عن تصاعد التكاليف')
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     protected function getReportRecords(): ?Closure

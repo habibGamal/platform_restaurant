@@ -6,6 +6,7 @@ namespace App\Filament\App\Pages\Reports;
 
 use App\Filament\App\Widgets\Reports\SalesComparison\DiscountIntensityWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\GrowthDecompositionTableWidget;
+use App\Filament\App\Widgets\Reports\SalesComparison\OrderTypeSalesWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\SalesKpiMatrixWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\SalesKpiOverviewWidget;
 use App\Filament\App\Widgets\Reports\SalesComparison\SalesMixChartWidget;
@@ -60,6 +61,7 @@ class SalesComparison extends ReportPage
     {
         return [
             SalesKpiOverviewWidget::class,
+            OrderTypeSalesWidget::class,
             SalesKpiMatrixWidget::class,
             TrafficBasketScatterWidget::class,
             SalesTrendChartWidget::class,

@@ -86,6 +86,17 @@ class ReportToolsTest extends TestCase
         $this->assertCount(1, $result['metrics']['branches']);
     }
 
+    public function test_cost_tools_define_the_inventory_variance_sign(): void
+    {
+        // A negative variance cost is a stock surplus that raises profit; models kept calling it a shortage.
+        $this->seed(RolesAndPermissionsSeeder::class);
+        $fixture = TwoBranchesTwoWeeks::create();
+        foreach ([ProfitabilityTool::class => 'inventoryVarianceCost', FoodCostWasteTool::class => 'inventoryVarianceCost', OverviewTool::class => 'inventory_variance'] as $class => $field) {
+            $result = json_decode((new $class($fixture->owner))->handle(new Request($this->filters())), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertStringContainsString('surplus', $result['definitions'][$field] ?? '', $class);
+        }
+    }
+
     public function test_custom_dates_must_be_present_and_ordered(): void
     {
         $this->seed(RolesAndPermissionsSeeder::class);

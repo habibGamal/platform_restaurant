@@ -48,10 +48,11 @@ final class InjectRuntimeContext
         $budgetState = $organization !== null ? $guard->state($organization)->value : BudgetState::OK->value;
 
         $contextNote = sprintf(
-            '[Runtime Context: Today is %s %s (%s). User role: %s. Accessible branches count: %d. Channel: %s. Budget state: %s.]',
+            '[Runtime Context: Today is %s %s (%s); the current year is %d. Months named without a year mean the latest such months up to today: resolve them with resolve_period months, never by guessing a year. User role: %s. Accessible branches count: %d. Channel: %s. Budget state: %s.]',
             $today,
             $time,
             $timezone,
+            $now->year,
             $roleStr,
             $branchCount,
             $channelStr,

@@ -38,6 +38,17 @@ return [
         'rules' => $marketingRules,
     ],
     [
+        'id' => 'mkt_focus_two_months',
+        'category' => 'marketing',
+        'persona' => 'owner',
+        'question' => 'اشتغل على داتا شهر 9 وشهر 10 وقولي أفضل 5 منتجات أشتغل عليهم في شهر 11',
+        'expected_tools' => ['marketing_specialist', 'rank_items', 'get_combo_candidates'],
+        'expected_numbers' => [],
+        'must_refuse' => false,
+        'fixture' => 'menu',
+        'rules' => $marketingRules,
+    ],
+    [
         'id' => 'mkt_top_seller_campaign',
         'category' => 'marketing',
         'persona' => 'owner',

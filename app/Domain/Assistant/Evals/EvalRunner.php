@@ -10,7 +10,10 @@ use App\Domain\Assistant\GroundingResult;
 use App\Domain\Assistant\NumericGroundingChecker;
 use App\Domain\Menu\ItemRole;
 use App\Domain\Menu\ItemRoles;
+use App\Jobs\BuildMenuIntelligence;
 use App\Models\CatalogItem;
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Event;
 use InvalidArgumentException;
 use Laravel\Ai\Events\ToolInvoked;
@@ -37,8 +40,9 @@ use Throwable;
  *  - no_delegation: no specialist agent was called
  *  - delegates:<agent>: the named specialist agent was called
  *  - focus_excludes_roles:<role>,...: the answer has a «ركز على» section and no item named in it has one of those roles or no trusted role
- *  - combos_one_main_above_floor: every combo_builder combo has exactly one main and margin_pct >= margin_floor_pct;
- *    a run without combo_builder combos must not propose combos naming menu items
+ *  - combos_one_main_above_floor: every combo returned by combo_builder, get_combo_candidates or get_item_card has
+ *    exactly one main and margin_pct >= its floor (margin_floor_pct, or checks.floor per prepared combo); a run
+ *    without returned combos must not propose combos naming menu items
  *  - grounded: the NumericGroundingChecker finds every number of the answer in the tool results
  */
 class EvalRunner
@@ -49,6 +53,9 @@ class EvalRunner
     private const FOCUS_SECTION = 'ركز على';
 
     private const COMBO_SECTION = 'كومبو مقترح';
+
+    /** Tools whose results carry priced combos under `metrics.combos`. */
+    private const COMBO_TOOLS = ['combo_builder', 'get_combo_candidates', 'get_item_card'];
 
     /** Section headings of a marketing answer. */
     private const SECTIONS = [self::FOCUS_SECTION, 'متلمسش', self::COMBO_SECTION, 'أفكار'];
@@ -72,6 +79,12 @@ class EvalRunner
         'DIFF-LINE' => ItemRole::Adjustment,
         'BULK-FLOUR' => ItemRole::Raw,
     ];
+
+    /** Months of MenuFixture (2026-08-18 .. 2026-10-16) prepared for the menu-intelligence tools. */
+    public const MENU_PERIODS = ['2026-09', '2026-10'];
+
+    /** The fixed "now" of that build, soon after the fixture's last sale (2026-10-16). */
+    public const MENU_BUILD_DATE = '2026-11-08 12:00:00';
 
     private bool $menuRolesSeeded = false;
 
@@ -330,10 +343,32 @@ class EvalRunner
             foreach (self::MENU_ROLES as $itemKey => $role) {
                 $roles->setOwnerRole($this->menuFixture->organization->id, $itemKey, $role);
             }
+            $this->buildMenuIntelligence($this->menuFixture->organization->id);
             $this->menuRolesSeeded = true;
         }
 
         return $this->menuFixture;
+    }
+
+    /**
+     * The prepared-data tools read the nightly build, and evals run no queue worker: build the fixture's months
+     * now, without model calls. The clock is held at MENU_BUILD_DATE, because the builders' look-back windows
+     * (e.g. items sold in the last 180 days) would find none of the fixture's 2026 sales from a later real date.
+     */
+    private function buildMenuIntelligence(int $organizationId): void
+    {
+        $carbonNow = Carbon::getTestNow();
+        $immutableNow = CarbonImmutable::getTestNow();
+        $buildDate = CarbonImmutable::parse(self::MENU_BUILD_DATE, 'Africa/Cairo');
+        Carbon::setTestNow($buildDate);
+        CarbonImmutable::setTestNow($buildDate);
+
+        try {
+            app()->call([new BuildMenuIntelligence($organizationId, self::MENU_PERIODS, classifierCalls: 0), 'handle']);
+        } finally {
+            Carbon::setTestNow($carbonNow);
+            CarbonImmutable::setTestNow($immutableNow);
+        }
     }
 
     /**
@@ -427,20 +462,19 @@ class EvalRunner
         $comboCount = 0;
 
         foreach ($toolResults as $call) {
-            if ($call['tool'] !== 'combo_builder') {
+            if (! in_array($call['tool'], self::COMBO_TOOLS, true)) {
                 continue;
             }
 
             $decoded = is_string($call['result']) ? json_decode($call['result'], true) : null;
             if (! is_array($decoded)) {
-                $problems[] = 'unreadable combo_builder result';
+                $problems[] = "unreadable {$call['tool']} result";
 
                 continue;
             }
 
             $payload = is_array($decoded['metrics'] ?? null) ? $decoded['metrics'] : $decoded;
             $combos = is_array($payload['combos'] ?? null) ? $payload['combos'] : [];
-            $floor = $payload['margin_floor_pct'] ?? null;
 
             foreach ($combos as $combo) {
                 $comboCount++;
@@ -450,20 +484,22 @@ class EvalRunner
                     $problems[] = "combo {$comboCount} has {$mains} main items";
                 }
 
+                // combo_builder returns one floor per result; get_combo_candidates and get_item_card one per combo, under checks.
+                $floor = $payload['margin_floor_pct'] ?? (is_array($combo['checks'] ?? null) ? ($combo['checks']['floor'] ?? null) : null);
                 $margin = $combo['margin_pct'] ?? null;
                 if (! is_numeric($margin) || ! is_numeric($floor)) {
-                    $problems[] = "combo {$comboCount} lacks margin_pct or margin_floor_pct";
+                    $problems[] = "combo {$comboCount} lacks margin_pct or a floor (margin_floor_pct or checks.floor)";
                 } elseif ((float) $margin < (float) $floor) {
                     $problems[] = "combo {$comboCount} margin {$margin} is below the floor {$floor}";
                 }
             }
         }
 
-        // Without combo_builder combos the answer must not propose any: a combo section naming items was invented.
+        // Without returned combos the answer must not propose any: a combo section naming items was invented.
         if ($comboCount === 0) {
             $section = $this->section($replyText, self::COMBO_SECTION);
             if ($section !== null && $this->mentionedItems($section, $organizationId) !== []) {
-                $problems[] = 'the answer proposes combos that combo_builder never returned';
+                $problems[] = 'the answer proposes combos that no tool returned';
             }
         }
 

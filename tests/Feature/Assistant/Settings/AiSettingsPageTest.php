@@ -16,6 +16,7 @@ use App\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Laravel\Ai\AnonymousAgent;
 use Laravel\Ai\Exceptions\RateLimitedException;
 use Livewire\Livewire;
@@ -337,6 +338,26 @@ class AiSettingsPageTest extends TestCase
 
         AnonymousAgent::fake(['pong']);
 
+        $this->actingAs($this->owner);
+
+        Livewire::test(AiSettingsPage::class)
+            ->call('testConnection')
+            ->assertNotified('تم الاتصال بنجاح');
+    }
+
+    public function test_connection_does_not_log_provider_configuration(): void
+    {
+        AiSetting::factory()->create([
+            'organization_id' => $this->org->id,
+            'provider' => 'gemini',
+            'model' => 'gemini-3.8-flash',
+            'byo_key' => 'organization-secret',
+            'data_sharing_ack_at' => now(),
+        ]);
+
+        config(['ai.providers.gemini.key' => 'platform-secret']);
+        Log::shouldReceive('info')->never();
+        AnonymousAgent::fake(['pong']);
         $this->actingAs($this->owner);
 
         Livewire::test(AiSettingsPage::class)

@@ -9,10 +9,19 @@ use App\Domain\Metrics\Reports\SalesComparisonReport;
 use App\Filament\App\Widgets\Reports\BaseReportViewWidget;
 use App\Models\User;
 use App\Support\Format;
+use Filament\Tables\Table;
+use Illuminate\Support\HtmlString;
 
 class GrowthDecompositionTableWidget extends BaseReportViewWidget
 {
-    protected ?string $heading = 'تفكيك نمو المبيعات (أثر الطلبات مقابل أثر الفاتورة)';
+    protected ?string $heading = 'أسباب تغير المبيعات حسب الفرع';
+
+    public function table(Table $table): Table
+    {
+        return parent::table($table)
+            ->heading(new HtmlString('أسباب تغير المبيعات حسب الفرع <span tabindex="0" title="أثر الطلبات يقيس تغير العدد عند متوسط الفاتورة السابق، وأثر الفاتورة يقيس تغير المتوسط عند عدد الطلبات الحالي، وأثر المرتجعات يقيس تغير المرتجعات.">ⓘ</span>'))
+            ->description('أثر الطلبات = تغير عدد الطلبات × متوسط الفاتورة السابق. أثر الفاتورة = تغير متوسط الفاتورة × عدد الطلبات الحالي. أثر المرتجعات يوضح تأثير تغير المرتجعات على صافي المبيعات.');
+    }
 
     protected function getColumns(): array
     {

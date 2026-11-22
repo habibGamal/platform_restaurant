@@ -13,11 +13,12 @@ use Filament\Tables\Table;
 
 class SalesKpiMatrixWidget extends BaseReportViewWidget
 {
-    protected ?string $heading = 'مصفوفة مؤشرات الأداء للفروع (Side-by-Side Matrix)';
+    protected ?string $heading = 'مقارنة مؤشرات المبيعات للفروع';
 
     public function table(Table $table): Table
     {
         return parent::table($table)
+            ->description('يعرض كل صف مؤشرات الفرع للفترة المختارة والتغير مقارنة بالفترة السابقة المحددة.')
             ->recordClasses(fn (array $record): ?string => ($record['_is_group'] ?? false) ? 'bg-primary-50/50 dark:bg-primary-950/20 font-semibold' : null);
     }
 

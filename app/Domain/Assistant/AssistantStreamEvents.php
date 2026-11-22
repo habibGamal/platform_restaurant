@@ -35,6 +35,9 @@ final class AssistantStreamEvents
     /** @var array<string, array<string, Tool>> */
     private array $tools = [];
 
+    /** @var array<string, array{name: string, input: array<string, mixed>, agent: ?string}> */
+    private array $pendingToolCalls = [];
+
     private const PLAN_PREFIX = 'خطة:';
 
     /** Coordinator text not yet released: the start of a line that may still turn out to be a plan. */
@@ -78,15 +81,20 @@ final class AssistantStreamEvents
     {
         // The coordinator's invocation is fixed by its first event (normally StreamStart). A step stopped
         // before it starts (cancel, budget) only yields StreamEnd, which must still count as the coordinator's.
-        if ($specialist === null && $this->coordinatorInvocation === null && $event->invocationId !== null) {
-            $this->coordinatorInvocation = $event->invocationId;
-            $this->invocations[$event->invocationId] = 'assistant';
-        }
-        if ($event instanceof StreamStart && $specialist !== null && $event->invocationId !== null) {
-            $this->invocations[$event->invocationId] ??= self::AGENTS[$specialist][0] ?? $specialist;
+        if ($specialist !== null) {
+            $specialistKey = self::AGENTS[$specialist][0] ?? $specialist;
+            if ($event->invocationId !== null) {
+                $this->invocations[$event->invocationId] ??= $specialistKey;
+            }
+            $agent = $this->invocations[$event->invocationId ?? ''] ?? $specialistKey;
+        } else {
+            if ($this->coordinatorInvocation === null && $event->invocationId !== null) {
+                $this->coordinatorInvocation = $event->invocationId;
+                $this->invocations[$event->invocationId] = 'assistant';
+            }
+            $agent = $this->invocations[$event->invocationId ?? ''] ?? ($this->coordinatorInvocation === null ? 'assistant' : null);
         }
 
-        $agent = $this->invocations[$event->invocationId ?? ''] ?? null;
         if ($agent === null) {
             return [];
         }
@@ -100,6 +108,12 @@ final class AssistantStreamEvents
         if ($event instanceof ToolCall) {
             $events = $this->isCoordinator($event) ? $this->flush() : [];
             $name = $event->toolCall->name;
+            $toolCallId = $event->toolCall->id !== '' ? $event->toolCall->id : $event->id;
+            $this->pendingToolCalls[$toolCallId] = [
+                'name' => $name,
+                'input' => $event->toolCall->arguments,
+                'agent' => $agent === 'assistant' ? null : $agent,
+            ];
             $events[] = AssistantEvent::toolCall($name);
             if (isset(self::AGENTS[$name])) {
                 [$key, $label] = self::AGENTS[$name];
@@ -123,6 +137,19 @@ final class AssistantStreamEvents
                 $decoded = is_string($result) ? json_decode($result, true) : $result;
                 $summary = is_array($decoded) && is_string($decoded['summary'] ?? null) ? $decoded['summary'] : null;
                 $events[] = AssistantEvent::stepFinished($agent, $summary);
+            }
+
+            if ($this->isUiTool($name)) {
+                $toolCallId = $event->toolResult->id !== '' ? $event->toolResult->id : $event->id;
+                $pending = $this->pendingToolCalls[$toolCallId] ?? $this->pendingToolCalls[$event->id] ?? null;
+                unset($this->pendingToolCalls[$toolCallId], $this->pendingToolCalls[$event->id]);
+
+                $input = $pending['input'] ?? $event->toolResult->arguments;
+                $outputAgent = $pending['agent'] ?? ($agent === 'assistant' ? null : $agent);
+
+                $output = $this->resolveToolOutput($event);
+
+                $events[] = AssistantEvent::toolOutput($name, $toolCallId, $input, $output, $outputAgent);
             }
 
             return $this->forChannel($events);
@@ -263,6 +290,47 @@ final class AssistantStreamEvents
     private function planEvent(string $line): AssistantEvent
     {
         return AssistantEvent::plan(trim(substr($line, strlen(self::PLAN_PREFIX))));
+    }
+
+    private function isUiTool(string $name): bool
+    {
+        return in_array($name, (array) config('assistant.ui_tools', []), true);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveToolOutput(ToolResult $event): array
+    {
+        $isFailed = ! $event->successful || $event->error !== null || ! $event->toolResult->successful();
+
+        if ($isFailed) {
+            $errorMessage = $event->error
+                ?? $event->toolResult->error()
+                ?? (is_string($event->toolResult->result) && $event->toolResult->result !== '' ? $event->toolResult->result : null)
+                ?? 'الأداة مقدرتش ترجّع نتيجة.';
+
+            return ['error' => $errorMessage];
+        }
+
+        $raw = $event->toolResult->result;
+
+        if (is_array($raw)) {
+            /** @var array<string, mixed> $raw */
+            return $raw;
+        }
+
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                /** @var array<string, mixed> $decoded */
+                return $decoded;
+            }
+
+            return ['raw' => $raw];
+        }
+
+        return ['raw' => (string) $raw];
     }
 
     /**

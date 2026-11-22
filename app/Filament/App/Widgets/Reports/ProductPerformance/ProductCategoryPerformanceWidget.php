@@ -27,17 +27,12 @@ class ProductCategoryPerformanceWidget extends BaseReportTableWidget
 
     public function table(Table $table): Table
     {
-        $records = $this->getReportRecords();
-
-        if ($records !== null) {
-            $table->records($records);
-        }
+        $table = parent::table($table);
 
         return $table
             ->heading('أداء التصنيفات (Category Performance)')
             ->description('تحليل مبيعات وهوامش ربح تصنيفات الأصناف')
-            ->headerActions($this->getTableActions())
-            ->columns($this->getReportColumns());
+            ->headerActions($this->getTableActions());
     }
 
     /**

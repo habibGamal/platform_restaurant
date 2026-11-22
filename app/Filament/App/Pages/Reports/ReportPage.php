@@ -9,9 +9,7 @@ use App\Domain\Metrics\Period\Granularity;
 use App\Domain\Metrics\Period\PeriodPreset;
 use App\Domain\Metrics\Period\PeriodResolver;
 use App\Domain\Metrics\Period\ReportFilters;
-use App\Domain\Tenancy\AccessibleBranches;
 use App\Models\BranchSet;
-use App\Models\Restaurant;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
@@ -27,6 +25,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Livewire\Attributes\On;
 
 abstract class ReportPage extends BaseDashboard
 {
@@ -101,6 +100,13 @@ abstract class ReportPage extends BaseDashboard
             }
         }
 
+        $scope = session()->get('report_scope');
+        if (is_array($scope)) {
+            $resolvedFilters['restaurant'] = $scope['restaurant'] ?? null;
+            $resolvedFilters['branches'] = $scope['branches'] ?? null;
+            $resolvedFilters['set'] = null;
+        }
+
         $query = request()->query();
         if (isset($query['filters']) && is_array($query['filters'])) {
             $query = array_merge($query, $query['filters']);
@@ -145,9 +151,24 @@ abstract class ReportPage extends BaseDashboard
         }
     }
 
+    #[On('report-scope-changed')]
+    public function updateReportScope(?int $restaurant, ?array $branches): void
+    {
+        $this->filters = array_merge($this->filters ?? $this->getDefaultFilters(), [
+            'restaurant' => $restaurant, 'branches' => $branches, 'set' => null,
+        ]);
+        $this->draftFilters = array_merge($this->draftFilters ?? [], [
+            'restaurant' => $restaurant, 'branches' => $branches, 'set' => null,
+        ]);
+        $this->getFiltersForm()->fill($this->draftFilters);
+        if ($this->persistsFiltersInSession()) {
+            session()->put($this->getFiltersSessionKey(), $this->filters);
+        }
+    }
+
     public function applyFilters(): void
     {
-        $committed = $this->getFiltersForm()->getState();
+        $committed = array_merge($this->filters ?? [], $this->getFiltersForm()->getState());
         if (isset($committed['from']) && is_string($committed['from'])) {
             $committed['from'] = substr($committed['from'], 0, 10);
         }
@@ -170,7 +191,7 @@ abstract class ReportPage extends BaseDashboard
 
     public function resetFilters(): void
     {
-        $defaults = $this->getDefaultFilters();
+        $defaults = array_merge($this->getDefaultFilters(), session()->get('report_scope', []));
 
         $this->draftFilters = $defaults;
         $this->filters = $defaults;
@@ -281,6 +302,7 @@ abstract class ReportPage extends BaseDashboard
 
                 Select::make('compare')
                     ->label('المقارنة')
+                    ->hintIcon('heroicon-m-question-mark-circle', tooltip: 'نفس الأيام الأسبوع الماضي تعيد الفترة 7 أيام. الفترة المماثلة العام الماضي تعيدها 364 يوماً للحفاظ على أيام الأسبوع، وقد تختلف التواريخ الميلادية.')
                     ->options(collect(ComparisonMode::cases())->mapWithKeys(fn (ComparisonMode $case): array => [$case->value => $case->label()]))
                     ->placeholder(function (Get $get): string {
                         $presetVal = (string) ($get('preset') ?? PeriodPreset::today->value);
@@ -289,27 +311,6 @@ abstract class ReportPage extends BaseDashboard
                         return PeriodResolver::defaultComparison($preset)->label();
                     })
                     ->nullable(),
-
-                Select::make('branches')
-                    ->label('الفروع')
-                    ->multiple()
-                    ->searchable()
-                    ->options(function (): array {
-                        $user = auth()->user();
-                        if (! $user) {
-                            return [];
-                        }
-
-                        return AccessibleBranches::query($user)->pluck('name', 'id')->toArray();
-                    })
-                    ->hidden(function (): bool {
-                        $user = auth()->user();
-                        if (! $user) {
-                            return true;
-                        }
-
-                        return count(AccessibleBranches::ids($user)) <= 1;
-                    }),
 
                 Select::make('set')
                     ->label('مجموعة الفروع')
@@ -330,28 +331,13 @@ abstract class ReportPage extends BaseDashboard
                     ->placeholder('كل الفروع المتاحة')
                     ->nullable(),
 
-                Select::make('restaurant')
-                    ->label('المطعم / العلامة')
-                    ->options(function (): array {
-                        $user = auth()->user();
-                        if (! $user || ! $user->organization_id) {
-                            return [];
-                        }
-
-                        return Restaurant::query()
-                            ->where('organization_id', $user->organization_id)
-                            ->pluck('name', 'id')
-                            ->toArray();
-                    })
-                    ->placeholder('كل المطاعم')
-                    ->nullable(),
-
                 Toggle::make('lfl')
                     ->label('مقارنة نفس الفروع')
                     ->default(fn (): bool => (bool) ($this->getDefaultFilters()['lfl'] ?? false)),
 
                 Select::make('granularity')
                     ->label('التجميع الزمني')
+                    ->hintIcon('heroicon-m-question-mark-circle', tooltip: 'يجمع نقاط الرسم حسب اليوم أو الأسبوع الذي يبدأ السبت أو الشهر. تلقائياً: يومي حتى 31 يوماً، أسبوعي حتى 182 يوماً، ثم شهري.')
                     ->options(collect(Granularity::cases())->mapWithKeys(fn (Granularity $case): array => [$case->value => $case->label()]))
                     ->placeholder('تلقائي')
                     ->nullable(),

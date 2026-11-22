@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ai\Agents\Concerns;
 
+use App\Ai\ProviderKeys;
 use App\Ai\ProviderOptions;
 use App\Domain\Assistant\Channel;
 use App\Models\AiSetting;
@@ -48,9 +49,8 @@ trait UsesOrganizationAiSettings
             $onDemandName = "byo_{$primaryProvider}_{$orgId}";
 
             try {
-                $built = Ai::build(array_merge($baseConfig, [
+                $built = Ai::build(array_merge(ProviderKeys::withKey($baseConfig, $setting->byo_key), [
                     'name' => $onDemandName,
-                    'key' => $setting->byo_key,
                 ]));
                 $primaryProvider = $built->name();
             } catch (Throwable $e) {

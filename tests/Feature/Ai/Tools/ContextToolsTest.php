@@ -9,6 +9,7 @@ use App\Ai\Tools\Context\GetWorkspaceContext;
 use App\Ai\Tools\Context\ResolvePeriod;
 use App\Enums\BranchStatus;
 use App\Models\Branch;
+use Carbon\CarbonImmutable;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Ai\Tools\Request;
@@ -96,6 +97,52 @@ class ContextToolsTest extends TestCase
         $this->assertSame('2026-09-24', $result['comparison']['from']);
         $this->assertSame('2026-09-30', $result['comparison']['to']);
         $this->assertSame(7, $result['comparison']['days']);
+    }
+
+    public function test_dates_without_a_preset_are_used_as_a_custom_period(): void
+    {
+        // Models often send from/to and forget preset=custom; the dates must not be dropped for "today".
+        $result = json_decode((new ResolvePeriod($this->fixture->owner))->handle(new Request([
+            'from' => '2026-09-01',
+            'to' => '2026-10-31',
+        ])), true);
+
+        $this->assertSame('custom', $result['period']['preset']);
+        $this->assertSame('2026-09-01', $result['period']['from']);
+        $this->assertSame('2026-10-31', $result['period']['to']);
+    }
+
+    public function test_month_numbers_without_a_year_resolve_to_the_latest_past_months(): void
+    {
+        // "شهر 9 وشهر 10" asked on 2026-11-06 means 2026; the model must not have to guess the year.
+        $this->travelTo(CarbonImmutable::parse('2026-11-06 12:00', 'Africa/Cairo'));
+        $tool = new ResolvePeriod($this->fixture->owner);
+
+        $period = json_decode($tool->handle(new Request(['months' => [9, 10]])), true)['period'];
+        $this->assertSame(['custom', '2026-09-01', '2026-10-31'], [$period['preset'], $period['from'], $period['to']]);
+
+        // A month later than the current one is last year's; a span across New Year keeps its order.
+        $period = json_decode($tool->handle(new Request(['months' => [12]])), true)['period'];
+        $this->assertSame(['2025-12-01', '2025-12-31'], [$period['from'], $period['to']]);
+        $this->travelTo(CarbonImmutable::parse('2027-02-10 12:00', 'Africa/Cairo'));
+        $period = json_decode($tool->handle(new Request(['months' => [11, 12, 1]])), true)['period'];
+        $this->assertSame(['2026-11-01', '2027-01-31'], [$period['from'], $period['to']]);
+
+        // The current month runs to today; an explicit year wins.
+        $period = json_decode($tool->handle(new Request(['months' => [2]])), true)['period'];
+        $this->assertSame(['2027-02-01', '2027-02-10'], [$period['from'], $period['to']]);
+        $period = json_decode($tool->handle(new Request(['months' => [9], 'year' => 2025])), true)['period'];
+        $this->assertSame(['2025-09-01', '2025-09-30'], [$period['from'], $period['to']]);
+    }
+
+    public function test_omitted_period_defaults_to_this_month_as_the_schema_says(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-11-06 12:00', 'Africa/Cairo'));
+
+        $result = json_decode((new ResolvePeriod($this->fixture->owner))->handle(new Request), true);
+
+        $this->assertSame('this_month', $result['period']['preset']);
+        $this->assertSame('2026-11-01', $result['period']['from']);
     }
 
     public function test_find_branches_arabic_normalization_and_scoping(): void

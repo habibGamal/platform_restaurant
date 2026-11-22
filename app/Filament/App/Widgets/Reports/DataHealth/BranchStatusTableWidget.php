@@ -25,7 +25,7 @@ class BranchStatusTableWidget extends BaseReportTableWidget
         return $table
             ->heading('حالة اتصال الفروع وجودة المزامنة الحية')
             ->description('مراقبة الاتصال اللحظي بنقاط البيع وحزم البيانات المعلقة والفاشلة')
-            ->paginated(false);
+            ->paginated([15, 30, 50, 100]);
     }
 
     protected function getReportRecords(): ?Closure
