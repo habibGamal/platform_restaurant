@@ -1,9 +1,0 @@
-Your previous run was cut off by an API quota error. Continue task PF1 (aggregation, reconciliation, rebuild command, TwoBranchesTwoWeeks fixture) from where you stopped and finish every item of the original brief.
-Current state observed by the orchestrator:
-- tests/Feature/Aggregation/RebuildCommandTest::test_rebuild_command_with_specific_branch_and_range fails ("agg_branch_daily ... The table is empty").
-- PHPStan errors in app/Domain/Metrics/Aggregation/BranchDayRebuilder.php and Reconciler.php.
-- Verify the fixture tests/Fixtures/TwoBranchesTwoWeeks.php is COMPLETE (all data in the brief, hand-computed EXPECTED table at the top, deliberate mismatch on B 2026-10-14, B missing 2026-10-10) and that TwoBranchesTwoWeeksFixtureTest asserts every branch/day. The fixture must keep building data directly (not through the handlers).
-Gates: DB_DATABASE=platform_test_5 php artisan test tests/Feature/Aggregation; DB_DATABASE=platform_test_5 php artisan test; pint on your files; phpstan with 0 errors in your files.
-
-Rules unchanged: same file ownership as your original brief, same test database, no state-changing git commands, never run tests against platform_restaurants. Since you stopped, the orchestrator COMMITTED the warehouse handlers (app/Domain/Ingestion/Handlers/**, bound in IngestionServiceProvider) — do not edit them. Other agents are resuming in parallel in the same tree.
-IMPORTANT: run every command synchronously and wait for its result; do not end your reply while a command is running. Your LAST message must be the full report from your original brief (sections 1–4), covering the whole task, not just this continuation.
