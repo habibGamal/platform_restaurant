@@ -1,34 +1,62 @@
-import { defineConfig } from 'vitepress'
+import { defineConfig, type DefaultTheme } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
+import { productSwitcher } from './theme/products'
 
-const arStartSidebar = [
+const isPublic = process.env.DOCS_PUBLIC === '1'
+
+const productUrls = {
+  pos: process.env.DOCS_POS_URL,
+  website: process.env.DOCS_WEBSITE_URL,
+  platform: process.env.DOCS_PLATFORM_URL,
+}
+
+const arabicSidebar: DefaultTheme.Sidebar = [
   {
     text: 'البداية',
     items: [
-      { text: 'ما هي المنصة وربط الفروع', link: '/start/' },
+      { text: 'نظرة عامة', link: '/start/' },
+      { text: 'تسجيل الدخول واللوحات', link: '/start/first-login' },
+      { text: 'قاموس المصطلحات', link: '/start/glossary' },
     ],
   },
-]
-
-const arGuideSidebar = [
   {
-    text: 'دليل المستخدم',
+    text: 'دليل الاستخدام',
     items: [
       { text: 'نظرة عامة على الدليل', link: '/guide/' },
+      { text: 'الفلاتر والفترات والمقارنة', link: '/guide/filters-and-periods' },
+      { text: 'لوحة التحكم الرئيسية', link: '/guide/overview' },
+      { text: 'مقارنة المبيعات', link: '/guide/sales-comparison' },
+      { text: 'الأرباح والهوامش', link: '/guide/profitability' },
+      { text: 'تكلفة الخامات والهالك', link: '/guide/food-cost-and-waste' },
+      { text: 'أداء الأصناف', link: '/guide/product-performance' },
+      { text: 'الورديات وأيام الأسبوع', link: '/guide/shifts-and-weekdays' },
+      { text: 'ترتيب الفروع', link: '/guide/branch-ranking' },
+      { text: 'المستهدف مقابل المحقق', link: '/guide/targets-vs-actual' },
+      { text: 'المصروفات والمشتريات', link: '/guide/expenses-and-purchases' },
+      { text: 'حالة البيانات والاتصال', link: '/guide/data-health' },
+      { text: 'المساعد الذكي', link: '/guide/ai-analyst' },
     ],
   },
-]
-
-const integrationsSidebar = [
   {
-    text: 'Integrations',
+    text: 'الإدارة',
     items: [
-      { text: 'POS -> Platform Contract', link: '/integrations/pos' },
+      { text: 'المنظمات والمطاعم ومجموعات الفروع', link: '/admin/organizations' },
+      { text: 'المستخدمون والصلاحيات', link: '/admin/users-and-access' },
+      { text: 'إدارة الفروع ورموز الربط', link: '/admin/branches' },
+      { text: 'تحديد الأهداف وأحداث التقويم', link: '/admin/targets' },
+      { text: 'معايير التقييم وتصنيفات المصروفات', link: '/admin/scoring-and-expenses' },
+      { text: 'إدارة القائمة وإعدادات المساعد الذكي', link: '/admin/menu-and-ai' },
+    ],
+  },
+  {
+    text: 'التكامل',
+    items: [
+      { text: 'ربط نقطة البيع بالمنصة', link: '/integrations/pos' },
     ],
   },
 ]
 
-const devSidebar = [
+const devSidebar: DefaultTheme.Sidebar = [
   {
     text: 'Overview',
     items: [
@@ -40,7 +68,7 @@ const devSidebar = [
   {
     text: 'Ingestion & Analytics',
     items: [
-      { text: 'POS Integration Contract', link: '/integrations/pos' },
+      { text: 'POS Integration Contract', link: '/dev/integrations/pos' },
       { text: 'Warehouse & Aggregates', link: '/dev/warehouse-and-aggregates' },
       { text: 'Metrics & KPIs', link: '/dev/metrics-and-kpis' },
       { text: 'Reports Catalog', link: '/dev/reports' },
@@ -60,6 +88,7 @@ const devSidebar = [
       { text: 'Configuration', link: '/dev/configuration' },
       { text: 'Development Guide', link: '/dev/development' },
       { text: 'Testing', link: '/dev/testing' },
+      { text: 'Documentation style guide', link: '/dev/style-guide' },
     ],
   },
   {
@@ -73,13 +102,27 @@ const devSidebar = [
   },
 ]
 
+const redirects: Record<string, string> = {}
+
+const rootNav: DefaultTheme.NavItem[] = [
+  { text: 'البداية', link: '/start/', activeMatch: '^/start/' },
+  { text: 'دليل الاستخدام', link: '/guide/', activeMatch: '^/guide/' },
+  { text: 'الإدارة', link: '/admin/organizations', activeMatch: '^/admin/' },
+  { text: 'التكامل', link: '/integrations/pos', activeMatch: '^/integrations/' },
+  ...(isPublic ? [] : [{ text: 'Developer', link: '/dev/', activeMatch: '^/dev/' }]),
+  productSwitcher('platform', productUrls),
+]
+
 export default withMermaid(
   defineConfig({
     title: 'منصة المطاعم',
-    description: 'Central reporting, multi-unit analytics, POS ingestion, and AI analyst for restaurant chains',
+    description: 'دليل استخدام منصة المطاعم المركزية لإدارة الفروع والتقارير التحليلية والمحلل الذكي',
     cleanUrls: true,
     lastUpdated: true,
+    srcExclude: isPublic ? ['dev/**'] : [],
     head: [
+      ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+      ['style', {}, ':root { --brand: #4f46e5; }'],
       ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
       ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
       [
@@ -91,6 +134,9 @@ export default withMermaid(
       ],
     ],
     themeConfig: {
+      logo: '/logo.svg',
+      isPublic,
+      redirects,
       search: {
         provider: 'local',
         options: {
@@ -109,25 +155,15 @@ export default withMermaid(
         },
       },
       socialLinks: [{ icon: 'github', link: 'https://github.com/habibGamal/platform_restaurant' }],
-    },
+    } as DefaultTheme.Config & { isPublic: boolean; redirects: Record<string, string> },
     locales: {
       root: {
         label: 'العربية',
         lang: 'ar',
         dir: 'rtl',
         themeConfig: {
-          nav: [
-            { text: 'البداية', link: '/start/', activeMatch: '/start/' },
-            { text: 'دليل المستخدم', link: '/guide/', activeMatch: '/guide/' },
-            { text: 'عقد POS', link: '/integrations/pos' },
-            { text: 'Developer Docs', link: '/dev/' },
-            { text: 'سجل التغييرات', link: '/changelog' },
-          ],
-          sidebar: {
-            '/start/': arStartSidebar,
-            '/guide/': arGuideSidebar,
-            '/integrations/': integrationsSidebar,
-          },
+          nav: rootNav,
+          sidebar: arabicSidebar,
           outline: { level: [2, 3], label: 'في هذه الصفحة' },
           docFooter: { prev: 'السابق', next: 'التالي' },
           lastUpdated: { text: 'آخر تحديث' },
@@ -138,43 +174,54 @@ export default withMermaid(
           returnToTopLabel: 'العودة للأعلى',
           langMenuLabel: 'اللغة',
           notFound: { title: 'الصفحة غير موجودة', linkText: 'العودة للرئيسية', quote: '' },
-          footer: { message: 'وثائق منصة المطاعم' },
+          footer: { message: 'دليل استخدام منصة المطاعم' },
         },
       },
-      dev: {
-        label: 'English (Developer)',
-        lang: 'en',
-        dir: 'ltr',
-        link: '/dev/',
-        themeConfig: {
-          nav: [
-            { text: 'Overview', link: '/dev/', activeMatch: '/dev/' },
-            { text: 'POS Contract', link: '/integrations/pos' },
-            { text: 'Reports', link: '/dev/reports' },
-            { text: 'Operations', link: '/dev/ops/deployment' },
-            { text: 'العربية', link: '/' },
-          ],
-          sidebar: { '/dev/': devSidebar },
-          outline: { level: [2, 3] },
-          footer: {
-            message: 'Platform Restaurants developer documentation.',
-          },
-        },
-      },
+      ...(isPublic
+        ? {}
+        : {
+            dev: {
+              label: 'Developer (English)',
+              lang: 'en',
+              dir: 'ltr',
+              link: '/dev/',
+              themeConfig: {
+                nav: [
+                  { text: 'Handbook', link: '/dev/', activeMatch: '^/dev/(?!ops/)' },
+                  { text: 'Operations', link: '/dev/ops/deployment', activeMatch: '^/dev/ops/' },
+                  { text: 'POS Contract', link: '/dev/integrations/pos' },
+                  { text: 'Style guide', link: '/dev/style-guide' },
+                  { text: 'دليل المستخدم', link: '/' },
+                  productSwitcher('platform', productUrls),
+                ],
+                sidebar: { '/dev/': devSidebar },
+                outline: { level: [2, 3], label: 'On this page' },
+                docFooter: { prev: 'Previous', next: 'Next' },
+                lastUpdated: { text: 'Last updated' },
+                footer: {
+                  message: 'Platform Restaurants developer handbook. End-user Arabic guide lives at /.',
+                },
+              },
+            },
+          }),
     },
     mermaid: {
       theme: 'base',
       themeVariables: {
-        primaryColor: '#ccfbf1',
-        primaryBorderColor: '#0f766e',
-        primaryTextColor: '#134e4a',
-        lineColor: '#0d9488',
+        primaryColor: '#e0e7ff',
+        primaryBorderColor: '#4f46e5',
+        primaryTextColor: '#1e1b4b',
+        lineColor: '#6366f1',
         secondaryColor: '#fef3c7',
         tertiaryColor: '#f8fafc',
-        clusterBkg: '#f0fdfa',
-        clusterBorder: '#99f6e4',
+        clusterBkg: '#eef2ff',
+        clusterBorder: '#c7d2fe',
         fontFamily: 'Inter, IBM Plex Sans Arabic, sans-serif',
       },
+    },
+    vite: {
+      css: { postcss: {} },
+      build: { chunkSizeWarningLimit: 4000 },
     },
   }),
 )

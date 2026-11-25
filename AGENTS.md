@@ -29,7 +29,7 @@
 | Dev (HTTP server, Vite, queues incl. `assistant`) | `composer dev` |
 | AI eval dry run | `php artisan ai:eval --dry-run` |
 | Docs dev server (VitePress on port 5175) | `cd docs && npm run dev` |
-| Docs production build | `cd docs && npm run build` |
+| Docs production build | `cd docs && npm run build` (public site without /dev/: `npm run build:public`) |
 | Docs hygiene check | `bash scripts/docs-check.sh` |
 
 **Never run `php artisan test` against the dev database** — configure a test database (e.g. `DB_DATABASE=platform_testing` in `phpunit.xml`).
@@ -65,6 +65,7 @@
 - Any PR that changes behaviour, settings, an API, or deployment must update the matching `docs/` page in the same PR and add a line to `CHANGELOG.md`.
 - Only these `.md` locations are allowed: `docs/**` (excluding `docs/node_modules`), `.workspace/**`, `README.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/**`, and `resources/ai/**`.
 - Run `bash scripts/docs-check.sh` before pushing.
+- The docs theme in `docs/.vitepress/theme/` is shared by the POS, website and platform docs and is edited only in the POS repo. See `docs/dev/style-guide.md` ("Shared theme") and `bash scripts/docs-theme.sh`.
 
 ## Workspace
 

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vitepress dev --port 5175",
     "build": "vitepress build",
+    "build:public": "DOCS_PUBLIC=1 vitepress build",
     "preview": "vitepress preview"
   },
   "devDependencies": {

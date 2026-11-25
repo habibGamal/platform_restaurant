@@ -119,16 +119,22 @@ if [ "${#ar_files[@]}" -gt 0 ]; then
   fi
 fi
 
+# 4. Shared docs theme must match theme.lock (owned by the POS repo)
+if ! bash "$repo_root/scripts/docs-theme.sh" verify; then
+  errors=1
+fi
+
 if [ "$errors" -ne 0 ]; then
   exit 1
 fi
 
-# 4. Optional VitePress build
+# 5. Optional VitePress build (both full and public-only)
 if [ "$run_build" -eq 1 ]; then
   (
     cd "$repo_root/docs"
     npm ci
     npx vitepress build
+    DOCS_PUBLIC=1 npx vitepress build
   )
 fi
 
