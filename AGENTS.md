@@ -29,7 +29,7 @@
 | Dev (HTTP server, Vite, queues incl. `assistant`) | `composer dev` |
 | AI eval dry run | `php artisan ai:eval --dry-run` |
 | Docs dev server (VitePress on port 5175) | `cd docs && npm run dev` |
-| Docs production build | `cd docs && npm run build` |
+| Docs production build | `cd docs && npm run build` (public site without /dev/: `npm run build:public`) |
 | Docs hygiene check | `bash scripts/docs-check.sh` |
 
 **Never run `php artisan test` against the dev database** — configure a test database (e.g. `DB_DATABASE=platform_testing` in `phpunit.xml`).

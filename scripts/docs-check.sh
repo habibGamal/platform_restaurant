@@ -123,12 +123,13 @@ if [ "$errors" -ne 0 ]; then
   exit 1
 fi
 
-# 4. Optional VitePress build
+# 4. Optional VitePress build (both full and public-only)
 if [ "$run_build" -eq 1 ]; then
   (
     cd "$repo_root/docs"
     npm ci
     npx vitepress build
+    DOCS_PUBLIC=1 npx vitepress build
   )
 fi
 

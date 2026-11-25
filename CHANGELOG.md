@@ -7,6 +7,7 @@ This project is not versioned; history is grouped by month.
 
 ### Added
 - Consolidated documentation into a single VitePress 1.6.4 site in `docs/` (Arabic default at `/`, English developer docs under `/dev/`), added `AGENTS.md`, `CLAUDE.md`, `.workspace/`, `scripts/docs-check.sh`, and `.github/workflows/docs-check.yml`.
+- Arabic user and admin guide (start, guide with the 10 reports, filters and periods, AI analyst, admin pages, POS how-to) and the shared docs theme copied unchanged from the POS repo; public build (`npm run build:public`) leaves out `/dev/`.
 
 ### Removed
 - Removed the legacy in-app Docsify viewer (`docs/index.html`, `docs/_sidebar.md`, `docs_server.php`, `ServeDocsCommand` / `docs:serve`, `/docs/{file?}` route, and the `/app` "التوثيق الفني" navigation item).
