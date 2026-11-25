@@ -1,9 +1,0 @@
-Your previous run was cut off by an API quota error. Continue task PC (report UI kit for the app panel) from where you stopped and finish every item of the original brief.
-Current state observed by the orchestrator:
-- tests/Feature/App/ReportFiltersFormTest::test_query_string_produces_matching_report_filters_on_page fails: preset stays 'today' instead of 'custom' — query-string values are not applied on mount.
-- PHPStan errors in app/Filament/App/Pages/Reports/ReportPage.php.
-Re-check every item (base page + filters form, widget trait, BaseKpiStatsWidget, chart base, table/view base, Format, BranchColor, Blade components, 10 placeholder pages with slugs, Overview as home, canAccess on analytics.view) and finish anything missing.
-Gates: DB_DATABASE=platform_test_4 php artisan test tests/Feature/App --exclude-group=none (exclude nothing; tests/Feature/App/Management belongs to another agent but should also pass); DB_DATABASE=platform_test_4 php artisan test; pint on your files; phpstan with 0 errors in your files; php artisan route:list --path=app. In the report, give the exact API report agents must use.
-
-Rules unchanged: same file ownership as your original brief, same test database, no state-changing git commands, never run tests against platform_restaurants. Since you stopped, the orchestrator COMMITTED the warehouse handlers (app/Domain/Ingestion/Handlers/**, bound in IngestionServiceProvider) — do not edit them. Other agents are resuming in parallel in the same tree.
-IMPORTANT: run every command synchronously and wait for its result; do not end your reply while a command is running. Your LAST message must be the full report from your original brief (sections 1–4), covering the whole task, not just this continuation.

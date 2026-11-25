@@ -8,8 +8,7 @@
         "dev": "vp dev",
         "check": "vp check",
         "check:fix": "vp check --fix",
-        "types:check": "tsc --noEmit",
-        "docs": "php artisan docs:serve"
+        "types:check": "tsc --noEmit"
     },
     "dependencies": {
         "@ai-sdk/react": "4.0.169",
